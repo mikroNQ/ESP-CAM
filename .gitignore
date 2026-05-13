@@ -1,4 +1,5 @@
 build/
+tools/
 *.bin
 *.elf
 *.map

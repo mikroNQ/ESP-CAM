@@ -26,7 +26,37 @@
 ![Подключение к UART-стороне](docs/images/wiring-uart-side.jpg)
 ![Подключение к стороне питания](docs/images/wiring-power-side.jpg)
 
-## Сборка и прошивка через arduino-cli
+## Быстрый старт — интерактивный скрипт
+
+Если просто хочешь повторить всё с нуля на новом модуле:
+
+```powershell
+git clone git@github.com:mikroNQ/ESP-CAM.git
+cd ESP-CAM
+.\scripts\setup-esp-cam.ps1
+```
+
+Скрипт:
+
+1. Скачает `arduino-cli` в `tools/` (если нет в PATH)
+2. Поставит `esp32:esp32@3.3.8` core и `WiFiManager@2.0.17` (если ещё не стоят)
+3. Найдёт USB-TTL переходник в системе и спросит какой использовать
+4. (Опц.) Прогонит loopback на трёх baud
+5. Покажет схему подключения и подождёт подтверждения
+6. Откроет serial monitor — проверит, что модуль жив, опознает stock AT firmware
+7. Попросит поставить `IO0↔GND`, скомпилирует и зальёт sketch
+8. Поймает IP-адрес из вывода WiFiManager после captive portal и предложит открыть в браузере
+
+Опциональные флаги:
+
+```powershell
+.\scripts\setup-esp-cam.ps1 -ComPort COM5      # явный порт
+.\scripts\setup-esp-cam.ps1 -SkipLoopback      # без проверки адаптера
+.\scripts\setup-esp-cam.ps1 -SkipBootCheck     # сразу к прошивке
+.\scripts\setup-esp-cam.ps1 -NoBrowser         # не открывать браузер
+```
+
+## Сборка и прошивка через arduino-cli вручную
 
 ```powershell
 # Однократно
