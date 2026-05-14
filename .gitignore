@@ -6,3 +6,11 @@ tools/
 *.bak
 .DS_Store
 Thumbs.db
+
+# Go relay (см. relay/)
+*.exe
+*.exe~
+relay/esp-relay
+relay/esp-relay-*
+go.work
+go.work.sum
