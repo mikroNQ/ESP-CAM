@@ -22,6 +22,10 @@
 #include "sdkconfig.h"
 #include "camera_index.h"
 #include "board_config.h"
+#include <Preferences.h>
+#include "config.h"
+#include "led_detector.h"
+#include "tcp_reporter.h"
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -154,6 +158,43 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
   return len;
 }
 
+// Draw a 2px green outline of the ROI directly on an RGB565 framebuffer, so
+// /capture?roi=1 lets you aim the detector window visually in a browser.
+// RGB565 is stored big-endian per pixel (hi byte first); 0x07E0 = green.
+static void draw_roi_rect(camera_fb_t *fb, led_roi_t roi) {
+  if (fb->format != PIXFORMAT_RGB565) return;
+  uint8_t *buf = fb->buf;
+  const int W = fb->width, H = fb->height;
+  int x0 = roi.x, y0 = roi.y;
+  int x1 = roi.x + roi.w - 1, y1 = roi.y + roi.h - 1;
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 >= W) x1 = W - 1;
+  if (y1 >= H) y1 = H - 1;
+  if (x1 < x0 || y1 < y0) return;
+
+  const uint8_t hi = 0x07, lo = 0xE0;  // green
+#define PUT(px, py)                                       \
+  do {                                                    \
+    size_t _i = ((size_t)(py) * W + (px)) * 2;            \
+    buf[_i] = hi;                                          \
+    buf[_i + 1] = lo;                                      \
+  } while (0)
+  for (int x = x0; x <= x1; x++) {
+    for (int t = 0; t < 2; t++) {
+      if (y0 + t <= y1) PUT(x, y0 + t);
+      if (y1 - t >= y0) PUT(x, y1 - t);
+    }
+  }
+  for (int y = y0; y <= y1; y++) {
+    for (int t = 0; t < 2; t++) {
+      if (x0 + t <= x1) PUT(x0 + t, y);
+      if (x1 - t >= x0) PUT(x1 - t, y);
+    }
+  }
+#undef PUT
+}
+
 static esp_err_t capture_handler(httpd_req_t *req) {
   camera_fb_t *fb = NULL;
   esp_err_t res = ESP_OK;
@@ -174,6 +215,20 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     log_e("Camera capture failed");
     httpd_resp_send_500(req);
     return ESP_FAIL;
+  }
+
+  // Optional ROI overlay for aiming: /capture?roi=1
+  size_t qlen = httpd_req_get_url_query_len(req);
+  if (qlen) {
+    char *q = (char *)malloc(qlen + 1);
+    if (q) {
+      char v[8];
+      if (httpd_req_get_url_query_str(req, q, qlen + 1) == ESP_OK &&
+          httpd_query_key_value(q, "roi", v, sizeof(v)) == ESP_OK && atoi(v) != 0) {
+        draw_roi_rect(fb, ledDetectorGetRoi());
+      }
+      free(q);
+    }
   }
 
   httpd_resp_set_type(req, "image/jpeg");
@@ -419,7 +474,7 @@ static int print_reg(char *p, char *end, sensor_t *s, uint16_t reg, uint32_t mas
 }
 
 static esp_err_t status_handler(httpd_req_t *req) {
-  static char json_response[1024];
+  static char json_response[1536];
 
   sensor_t *s = esp_camera_sensor_get();
   char *p = json_response;
@@ -487,11 +542,83 @@ static esp_err_t status_handler(httpd_req_t *req) {
 #else
   p += snprintf(p, end - p, ",\"led_intensity\":%d", -1);
 #endif
+  // LED detector + TCP reporter status.
+  led_roi_t droi = ledDetectorGetRoi();
+  p += snprintf(p, end - p,
+                ",\"det_enabled\":%d,\"det_state\":\"%s\",\"det_conf\":%.2f,"
+                "\"det_roi\":[%u,%u,%u,%u],\"tcp_host\":\"%s\",\"tcp_port\":%u,"
+                "\"tcp_connected\":%d",
+                ledDetectorIsEnabled() ? 1 : 0, led_state_name(ledDetectorCurrentState()),
+                ledDetectorCurrentConfidence(), droi.x, droi.y, droi.w, droi.h,
+                tcpReporterHost(), tcpReporterPort(), tcpReporterConnected() ? 1 : 0);
   *p++ = '}';
   *p++ = 0;
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   return httpd_resp_send(req, json_response, strlen(json_response));
+}
+
+// /detcfg — read/update the LED detector + TCP reporter config and persist to
+// NVS. Accepts any subset of: host, port, roi_x, roi_y, roi_w, roi_h, enable.
+// Always responds with the current effective config as JSON.
+static esp_err_t detcfg_handler(httpd_req_t *req) {
+  char *buf = NULL;
+  Preferences prefs;
+
+  // Query is optional: with no params this just returns the current config.
+  if (httpd_req_get_url_query_len(req) > 0) {
+    if (parse_get(req, &buf) != ESP_OK) {
+      return ESP_FAIL;  // parse_get already sent an error response
+    }
+    prefs.begin(DET_NVS_NS, false);  // read-write
+    char v[64];
+    led_roi_t roi = ledDetectorGetRoi();
+    bool roi_changed = false;
+
+    if (httpd_query_key_value(buf, "host", v, sizeof(v)) == ESP_OK) {
+      tcpReporterSetEndpoint(v, tcpReporterPort());
+      prefs.putString(DET_NVS_HOST, v);
+    }
+    if (httpd_query_key_value(buf, "port", v, sizeof(v)) == ESP_OK) {
+      uint16_t port = (uint16_t)atoi(v);
+      tcpReporterSetEndpoint(tcpReporterHost(), port);
+      prefs.putUShort(DET_NVS_PORT, port);
+    }
+    if (httpd_query_key_value(buf, "roi_x", v, sizeof(v)) == ESP_OK) {
+      roi.x = (uint16_t)atoi(v); prefs.putUShort(DET_NVS_ROI_X, roi.x); roi_changed = true;
+    }
+    if (httpd_query_key_value(buf, "roi_y", v, sizeof(v)) == ESP_OK) {
+      roi.y = (uint16_t)atoi(v); prefs.putUShort(DET_NVS_ROI_Y, roi.y); roi_changed = true;
+    }
+    if (httpd_query_key_value(buf, "roi_w", v, sizeof(v)) == ESP_OK) {
+      roi.w = (uint16_t)atoi(v); prefs.putUShort(DET_NVS_ROI_W, roi.w); roi_changed = true;
+    }
+    if (httpd_query_key_value(buf, "roi_h", v, sizeof(v)) == ESP_OK) {
+      roi.h = (uint16_t)atoi(v); prefs.putUShort(DET_NVS_ROI_H, roi.h); roi_changed = true;
+    }
+    if (httpd_query_key_value(buf, "enable", v, sizeof(v)) == ESP_OK) {
+      bool en = atoi(v) != 0;
+      ledDetectorSetEnabled(en);
+      prefs.putBool(DET_NVS_EN, en);
+    }
+    if (roi_changed) ledDetectorSetRoi(&roi);
+    prefs.end();
+    free(buf);
+  }
+
+  led_roi_t roi = ledDetectorGetRoi();
+  char json[256];
+  int n = snprintf(json, sizeof(json),
+                   "{\"enabled\":%d,\"host\":\"%s\",\"port\":%u,"
+                   "\"roi\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},"
+                   "\"state\":\"%s\",\"conf\":%.2f,\"tcp_connected\":%d}",
+                   ledDetectorIsEnabled() ? 1 : 0, tcpReporterHost(), tcpReporterPort(),
+                   roi.x, roi.y, roi.w, roi.h,
+                   led_state_name(ledDetectorCurrentState()), ledDetectorCurrentConfidence(),
+                   tcpReporterConnected() ? 1 : 0);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, json, n);
 }
 
 static esp_err_t xclk_handler(httpd_req_t *req) {
@@ -819,6 +946,19 @@ void startCameraServer() {
 #endif
   };
 
+  httpd_uri_t detcfg_uri = {
+    .uri = "/detcfg",
+    .method = HTTP_GET,
+    .handler = detcfg_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = true,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
   ra_filter_init(&ra_filter, 20);
 
   log_i("Starting web server on port: '%u'", config.server_port);
@@ -834,6 +974,7 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &greg_uri);
     httpd_register_uri_handler(camera_httpd, &pll_uri);
     httpd_register_uri_handler(camera_httpd, &win_uri);
+    httpd_register_uri_handler(camera_httpd, &detcfg_uri);
   }
 
   config.server_port += 1;

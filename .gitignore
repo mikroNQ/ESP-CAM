@@ -14,3 +14,8 @@ relay/esp-relay
 relay/esp-relay-*
 go.work
 go.work.sum
+
+# ML pipeline (см. ml/)
+ml/data/
+ml/__pycache__/
+*.tflite
