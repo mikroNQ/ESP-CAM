@@ -33,7 +33,7 @@ def load_dataset():
         if not paths:
             print(f"  warning: no samples for class '{name}'")
         for p in paths:
-            img = Image.open(p).convert("RGB").resize((INPUT_W, INPUT_H))
+            img = Image.open(p).convert("RGB").resize((INPUT_W, INPUT_H), Image.BOX)
             images.append(np.asarray(img, dtype=np.float32) / 255.0)  # [0,1]
             labels.append(idx)
     if not images:

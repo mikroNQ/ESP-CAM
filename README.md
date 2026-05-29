@@ -136,23 +136,47 @@ nc -lk 0.0.0.0 9000
 # затем: curl "http://<cam-ip>/detcfg?host=<your-ip>&port=9000&enable=1"
 ```
 
-### Обучение модели (`ml/`)
+### Сбор датасета и обучение модели (`ml/`)
 
-В репозиторий закоммичена **bootstrap-модель** (`CameraWebServer/led_model.h`) — со случайными весами: прошивка собирается и весь тракт (тайминги + TCP) работает сразу, но классифицирует мусор, пока не обучишь на реальных кадрах. Пайплайн (Python, на хосте):
+В репозиторий закоммичена **bootstrap-модель** (`CameraWebServer/led_model.h`) — со случайными весами: прошивка собирается и весь тракт (тайминги + TCP) работает сразу, но классифицирует мусор, пока не обучишь на реальных кадрах.
+
+**0. Подготовка камеры.** Прошей ESP32-CAM, жёстко зафиксируй её напротив сканера. Подгони ROI ровно по линии светодиодов и **зафиксируй экспозицию** (иначе авто-AGC «подтянет» яркость и `off`/`red` сольются):
+
+```bash
+# ROI по линии (сверяйся с http://<cam-ip>/bmp — живой кадр):
+curl "http://<cam-ip>/detcfg?roi_x=16&roi_y=40&roi_w=128&roi_h=40"
+# фиксируем экспозицию/усиление/баланс белого:
+curl "http://<cam-ip>/control?var=aec&val=0"
+curl "http://<cam-ip>/control?var=agc&val=0"
+curl "http://<cam-ip>/control?var=awb&val=0"
+curl "http://<cam-ip>/control?var=aec_value&val=300"   # подбери под свою сцену
+```
+
+**1. Снять кадры (авто-разметка по цвету).** `collect.py --auto` снимает потоком и сам раскладывает кропы по `off`/`red`/`white` (сомнительные → `_unsure`):
 
 ```bash
 cd ml
 pip install -r requirements.txt
-# 1. Собрать размеченные сэмплы с работающей камеры (по состоянию за раз):
-python collect.py --host <cam-ip> --label off   --count 200
-python collect.py --host <cam-ip> --label red   --count 200
-python collect.py --host <cam-ip> --label white --count 200
-# 2. Обучить + сгенерировать led_model.h (int8):
-python train.py --epochs 30
-# 3. Перекомпилировать и перепрошить firmware.
+python collect.py --host <cam-ip> --auto --count 600
 ```
 
-`make_bootstrap.py` пересоздаёт исходную пустую модель; `convert_to_header.py` конвертит любой `.tflite` в `led_model.h`. Порядок классов и геометрия входа едины в [`ml/model.py`](ml/model.py).
+Пороги эвристики можно подстроить: `--off-v`, `--red-margin`, `--white-min`. Если состояние удобнее снимать вручную — есть режим `--label off|red|white`.
+
+**2. Проверить разметку.** Просмотрщик показывает каждый кроп увеличенным с подсказкой эвристики; клавишами `o/r/w` правишь метку, `d` — удалить. Начни с папки `_unsure`:
+
+```bash
+python review.py
+```
+
+**3. Обучить и сгенерировать `led_model.h` (int8):**
+
+```bash
+python train.py --epochs 30
+```
+
+**4. Перекомпилировать и перепрошить** firmware — модель встроена в `led_model.h`.
+
+Вспомогательное: `autolabel.py` — эвристика цвета (общая для collect/review); `make_bootstrap.py` пересоздаёт пустую модель; `convert_to_header.py` конвертит любой `.tflite` в `led_model.h`. Порядок классов и геометрия входа едины в [`ml/model.py`](ml/model.py); ресемплинг при обучении (`Image.BOX`) совпадает с box-усреднением в прошивке.
 
 ## Структура
 
@@ -171,7 +195,9 @@ CameraWebServer/
 
 ml/                        # Python-пайплайн: сбор данных → обучение → led_model.h
 ├── model.py               # архитектура + int8-квантизация (единый источник правды)
-├── collect.py             # выгрузка размеченных ROI с /bmp
+├── autolabel.py           # эвристика цвета для авто-разметки
+├── collect.py             # выгрузка ROI с /bmp (--auto / --label)
+├── review.py              # Tkinter-просмотрщик для правки меток
 ├── train.py               # обучение + генерация led_model.h
 ├── make_bootstrap.py      # пустая модель со случайными весами
 ├── convert_to_header.py   # .tflite → led_model.h
