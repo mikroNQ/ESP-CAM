@@ -43,14 +43,31 @@ def load_dataset():
     return X, y
 
 
-def augment(X, y, factor=2):
-    """Light brightness/shift jitter to cover camera AGC/AWB variation."""
-    aug_X, aug_y = [X], [y]
+def augment(X, y, factor=3):
+    """Synthesise variants to cover camera AGC/AWB drift, framing jitter and
+    sensor noise so the model generalises beyond the exact capture conditions.
+
+    Each pass applies: brightness scale+bias, per-channel gain (white-balance
+    drift), gamma, a small spatial shift (framing jitter) and Gaussian noise.
+    """
     rng = np.random.default_rng(0)
+    aug_X, aug_y = [X], [y]
     for _ in range(factor):
-        scale = rng.uniform(0.8, 1.2, size=(len(X), 1, 1, 1)).astype(np.float32)
-        bias = rng.uniform(-0.05, 0.05, size=(len(X), 1, 1, 1)).astype(np.float32)
-        aug_X.append(np.clip(X * scale + bias, 0.0, 1.0))
+        n = len(X)
+        b_scale = rng.uniform(0.75, 1.25, (n, 1, 1, 1)).astype(np.float32)
+        b_bias = rng.uniform(-0.06, 0.06, (n, 1, 1, 1)).astype(np.float32)
+        chan = rng.uniform(0.9, 1.1, (n, 1, 1, 3)).astype(np.float32)   # AWB drift
+        gamma = rng.uniform(0.8, 1.25, (n, 1, 1, 1)).astype(np.float32)
+        x = np.clip(X * b_scale + b_bias, 0.0, 1.0) * chan
+        x = np.clip(x, 1e-6, 1.0) ** gamma
+        # Small framing jitter: shift each crop by a few pixels.
+        shifted = np.empty_like(x)
+        for k in range(n):
+            sy = int(rng.integers(-2, 3))
+            sx = int(rng.integers(-2, 3))
+            shifted[k] = np.roll(x[k], (sy, sx), axis=(0, 1))
+        x = shifted + rng.normal(0.0, 0.02, x.shape).astype(np.float32)
+        aug_X.append(np.clip(x, 0.0, 1.0))
         aug_y.append(y)
     return np.concatenate(aug_X), np.concatenate(aug_y)
 
