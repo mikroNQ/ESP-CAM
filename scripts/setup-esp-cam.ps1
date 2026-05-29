@@ -200,6 +200,18 @@ function Ensure-WiFiManager ([string]$cli) {
     Write-Ok "WiFiManager установлен"
 }
 
+function Ensure-TFLite ([string]$cli) {
+    Write-Step "Проверяю библиотеку Chirale_TensorFlowLite (ML-детектор светодиодов)"
+    $installed = & $cli lib list 2>&1 | Select-String -Pattern "^Chirale_TensorFlowLite\s"
+    if ($installed) {
+        Write-Ok "Chirale_TensorFlowLite уже стоит"
+        return
+    }
+    Write-Hint "Ставлю Chirale_TensorFlowLite..."
+    & $cli lib install "Chirale_TensorFlowLite" 2>&1 | Select-Object -Last 3 | ForEach-Object { Write-Hint $_ }
+    Write-Ok "Chirale_TensorFlowLite установлен"
+}
+
 # ============================================================
 # Детект COM-порта
 # ============================================================
@@ -463,6 +475,7 @@ try {
     $cli = Ensure-ArduinoCli
     Ensure-Esp32Core    $cli
     Ensure-WiFiManager  $cli
+    Ensure-TFLite       $cli
 
     # --- COM
     $port = Select-ComPort $ComPort

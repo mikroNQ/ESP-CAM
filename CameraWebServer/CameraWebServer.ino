@@ -2,14 +2,41 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WiFiManager.h>
+#include <Preferences.h>
 
 // ===========================
 // Select camera model in board_config.h
 // ===========================
 #include "board_config.h"
+#include "config.h"
+#include "led_detector.h"
+#include "tcp_reporter.h"
 
 void startCameraServer();
 void setupLedFlash();
+
+// Detector/reporter runtime config, loaded from NVS in setup().
+static led_roi_t det_roi = {DET_DEFAULT_ROI_X, DET_DEFAULT_ROI_Y, DET_DEFAULT_ROI_W, DET_DEFAULT_ROI_H};
+static bool det_enabled = DET_DEFAULT_ENABLED;
+static char det_host[64] = DET_DEFAULT_API_HOST;
+static uint16_t det_port = DET_DEFAULT_API_PORT;
+
+static void loadDetectorConfig() {
+  Preferences p;
+  if (!p.begin(DET_NVS_NS, true)) {  // read-only; absent namespace => defaults
+    return;
+  }
+  String h = p.getString(DET_NVS_HOST, det_host);
+  strncpy(det_host, h.c_str(), sizeof(det_host) - 1);
+  det_host[sizeof(det_host) - 1] = '\0';
+  det_port = p.getUShort(DET_NVS_PORT, det_port);
+  det_roi.x = p.getUShort(DET_NVS_ROI_X, det_roi.x);
+  det_roi.y = p.getUShort(DET_NVS_ROI_Y, det_roi.y);
+  det_roi.w = p.getUShort(DET_NVS_ROI_W, det_roi.w);
+  det_roi.h = p.getUShort(DET_NVS_ROI_H, det_roi.h);
+  det_enabled = p.getBool(DET_NVS_EN, det_enabled);
+  p.end();
+}
 
 void setup() {
   Serial.begin(115200);
@@ -36,33 +63,15 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_UXGA;
-  config.pixel_format = PIXFORMAT_JPEG;  // for streaming
-  //config.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
+  // RGB565 @ QQVGA in DRAM: the on-device ML detector needs raw pixels, and on
+  // this no-PSRAM board a small RGB565 frame is the only thing that fits. The
+  // MJPEG /stream and /capture handlers JPEG-encode this buffer on the fly.
+  config.pixel_format = PIXFORMAT_RGB565;
+  config.frame_size = FRAMESIZE_QQVGA;  // 160x120, matches DET_FRAME_W/H
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.fb_location = CAMERA_FB_IN_DRAM;
   config.jpeg_quality = 12;
   config.fb_count = 1;
-
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  //                      for larger pre-allocated frame buffer.
-  if (config.pixel_format == PIXFORMAT_JPEG) {
-    if (psramFound()) {
-      config.jpeg_quality = 10;
-      config.fb_count = 2;
-      config.grab_mode = CAMERA_GRAB_LATEST;
-    } else {
-      // Limit the frame size when PSRAM is not available
-      config.frame_size = FRAMESIZE_SVGA;
-      config.fb_location = CAMERA_FB_IN_DRAM;
-    }
-  } else {
-    // Best option for face detection/recognition
-    config.frame_size = FRAMESIZE_240X240;
-#if CONFIG_IDF_TARGET_ESP32S3
-    config.fb_count = 2;
-#endif
-  }
 
 #if defined(CAMERA_MODEL_ESP_EYE)
   pinMode(13, INPUT_PULLUP);
@@ -83,10 +92,8 @@ void setup() {
     s->set_brightness(s, 1);   // up the brightness just a bit
     s->set_saturation(s, -2);  // lower the saturation
   }
-  // drop down frame size for higher initial frame rate
-  if (config.pixel_format == PIXFORMAT_JPEG) {
-    s->set_framesize(s, FRAMESIZE_QVGA);
-  }
+  // Keep the sensor at QQVGA to match the detector's expected frame geometry.
+  s->set_framesize(s, FRAMESIZE_QQVGA);
 
 #if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
   s->set_vflip(s, 1);
@@ -120,6 +127,18 @@ void setup() {
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
+
+  // On-device LED detector + TCP reporter.
+  loadDetectorConfig();
+  if (ledDetectorInit(&det_roi, det_enabled)) {
+    ledDetectorStart();
+    tcpReporterInit(det_host, det_port);
+    tcpReporterStart();
+    Serial.printf("LED detector started (enabled=%d, endpoint=%s:%u)\n",
+                  det_enabled, det_host[0] ? det_host : "<unset>", det_port);
+  } else {
+    Serial.println("LED detector init failed; detection disabled");
+  }
 }
 
 void loop() {

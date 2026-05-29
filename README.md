@@ -7,7 +7,7 @@
 - **Плата**: AI-Thinker ESP32-CAM (клон, WROOM-32 без PSRAM в нашем экземпляре, сенсор OV3660)
 - **USB-TTL**: HW-597 (CH340G) — 6-пиновый: `5V | VCC | 3V3 | TXD | RXD | GND`
 - **ESP32 Arduino core**: `esp32:esp32@3.3.8`
-- **Библиотеки**: `WiFiManager@2.0.17`
+- **Библиотеки**: `WiFiManager@2.0.17`, `Chirale_TensorFlowLite` (ML-детектор светодиодов)
 - **FQBN**: `esp32:esp32:esp32cam`
 
 ## Распиновка для прошивки (UART0 + boot-strap)
@@ -65,6 +65,7 @@ arduino-cli config add board_manager.additional_urls https://espressif.github.io
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@3.3.8
 arduino-cli lib install "WiFiManager"
+arduino-cli lib install "Chirale_TensorFlowLite"
 
 # Каждый раз
 arduino-cli compile --fqbn esp32:esp32:esp32cam CameraWebServer
@@ -98,16 +99,83 @@ Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH34
 
 Стоковый `/stream` ESP32-CAM держится одним TCP-соединением — второй зритель получает «занято», а сама ESP не вытягивает несколько MJPEG-сессий без артефактов. В каталоге [`relay/`](relay/) лежит маленький Go-сервис на stdlib: открывает к камере одно постоянное соединение и раздаёт кадры произвольному числу клиентов в LAN (fan-out через каналы, медленные клиенты теряют кадры, не блокируя источник). Подробности и сборка — в [`relay/README.md`](relay/README.md).
 
+## Детектор светодиодной линии сканера (on-device ML) + TCP
+
+Камера наводится на сканер штрихкодов (например, Datalogic), у которого пульсирует линия подсветки: красные светодиоды подсветки и белые/статусные. Прошивка прямо на ESP32 крутит крошечную обученную нейросеть (TensorFlow Lite Micro через `Chirale_TensorFlowLite`), которая по вырезанной области кадра классифицирует состояние линии — **`off` / `red_on` / `white_on`** — различая цвета. Машина состояний с дебаунсом замеряет, **сколько длится каждое ON- и OFF-состояние**, и шлёт события по **сырому TCP-сокету** (постоянное соединение) на заданный endpoint в виде построчного JSON (NDJSON).
+
+### Важно про память (нет PSRAM)
+
+Чтобы модель и поток ужились в DRAM без PSRAM, камера переведена в **RGB565 @ QQVGA (160×120)**. Веб-поток `/stream` и `/capture` продолжают работать — кадр кодируется в JPEG на лету (ниже разрешением, чем раньше).
+
+### Формат TCP-событий (NDJSON, по строке на событие)
+
+```json
+{"type":"hello","dev":"esp32cam","ip":"192.168.1.50"}
+{"ts_ms":123456,"event":"transition","from":"red_on","to":"off","dur_ms":842,"conf":0.97}
+{"type":"dropped","count":3}
+```
+
+`dur_ms` — длительность состояния `from`, которое только что закончилось (так покрываются и ON-, и OFF-интервалы). `ts_ms` — `millis()` на момент перехода. `dropped` приходит после восстановления связи, если события терялись из-за переполнения очереди.
+
+### Настройка в рантайме — `/detcfg`
+
+Параметры хранятся в NVS и меняются GET-запросом (любой поднабор), ответ — текущая конфигурация JSON:
+
+```
+http://<cam-ip>/detcfg?host=<api-ip>&port=9000&enable=1
+http://<cam-ip>/detcfg?roi_x=16&roi_y=40&roi_w=128&roi_h=40   # подстроить ROI под линию
+http://<cam-ip>/detcfg                                         # просто прочитать текущую конфигурацию
+```
+
+Дефолты (endpoint, ROI, частота, дебаунс, размер арены) — в [`CameraWebServer/config.h`](CameraWebServer/config.h). Поля детектора также добавлены в `/status`.
+
+Проверить выход без своего API можно netcat-ом:
+
+```bash
+nc -lk 0.0.0.0 9000
+# затем: curl "http://<cam-ip>/detcfg?host=<your-ip>&port=9000&enable=1"
+```
+
+### Обучение модели (`ml/`)
+
+В репозиторий закоммичена **bootstrap-модель** (`CameraWebServer/led_model.h`) — со случайными весами: прошивка собирается и весь тракт (тайминги + TCP) работает сразу, но классифицирует мусор, пока не обучишь на реальных кадрах. Пайплайн (Python, на хосте):
+
+```bash
+cd ml
+pip install -r requirements.txt
+# 1. Собрать размеченные сэмплы с работающей камеры (по состоянию за раз):
+python collect.py --host <cam-ip> --label off   --count 200
+python collect.py --host <cam-ip> --label red   --count 200
+python collect.py --host <cam-ip> --label white --count 200
+# 2. Обучить + сгенерировать led_model.h (int8):
+python train.py --epochs 30
+# 3. Перекомпилировать и перепрошить firmware.
+```
+
+`make_bootstrap.py` пересоздаёт исходную пустую модель; `convert_to_header.py` конвертит любой `.tflite` в `led_model.h`. Порядок классов и геометрия входа едины в [`ml/model.py`](ml/model.py).
+
 ## Структура
 
 ```
 CameraWebServer/
-├── CameraWebServer.ino    # main: camera init + WiFiManager + сервер
-├── app_httpd.cpp          # HTTP-сервер, JPEG-стрим, REST для настроек
+├── CameraWebServer.ino    # main: camera init (RGB565/QQVGA) + WiFiManager + сервер + старт детектора
+├── app_httpd.cpp          # HTTP-сервер, JPEG-стрим, REST настроек, /detcfg
+├── config.h               # дефолты детектора/репортера + ключи NVS
+├── led_detector.h/.cpp    # TFLM-инференс по ROI, машина состояний, тайминги
+├── tcp_reporter.h/.cpp    # постоянный TCP-сокет, NDJSON, реконнект с backoff
+├── led_model.h            # сгенерированная int8-модель (bootstrap; см. ml/)
 ├── board_config.h         # выбор модели — здесь CAMERA_MODEL_AI_THINKER
 ├── camera_pins.h          # GPIO-маппинг для всех поддерживаемых плат
 ├── camera_index.h         # gzip'нутый HTML интерфейса
 └── partitions.csv         # 3MB app + OTA, нужно для >2MB прошивки
+
+ml/                        # Python-пайплайн: сбор данных → обучение → led_model.h
+├── model.py               # архитектура + int8-квантизация (единый источник правды)
+├── collect.py             # выгрузка размеченных ROI с /bmp
+├── train.py               # обучение + генерация led_model.h
+├── make_bootstrap.py      # пустая модель со случайными весами
+├── convert_to_header.py   # .tflite → led_model.h
+└── requirements.txt
 
 relay/                     # Go-сервис: MJPEG fan-out на N клиентов (см. relay/README.md)
 ├── main.go
