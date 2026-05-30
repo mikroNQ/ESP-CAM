@@ -105,7 +105,10 @@ py -c "import requests,io,numpy as np; from PIL import Image; h='<cam-ip>'; r=re
 # снимок состояния дашборда (JSON):
 (Invoke-WebRequest 'http://localhost:8080/api/state' -UseBasicParsing).Content
 
-# слушать сырые TCP-события без дашборда (нужен nc/ncat), либо смотреть /api/state
+# здоровье ESP (ребут vs стопор, сигнал, память):
+py -c "import requests; s=requests.get('http://<cam-ip>/status',timeout=8).json(); print('reset_reason=%s uptime_s=%s rssi=%s free_heap=%s'%(s['reset_reason'],s['uptime_s'],s['rssi'],s['free_heap']))"
+# reset_reason: 1=POWERON 9=BROWNOUT(слабое питание!) 6/7=WDT 4=PANIC.
+# uptime_s сбрасывается при «зависании» => был ребут (питание). rssi хуже -75 => слабый WiFi.
 ```
 
 Поймать IP камеры с порта (если забыл) — открой Serial Monitor на `<port>` @115200
@@ -137,4 +140,5 @@ git -c credential.helper= -c credential.helper=wincred push origin main
 | Порог уверенности | `CameraWebServer/config.h` | `DET_CONF_THRESHOLD=0.60` |
 | Размер арены TFLite | `CameraWebServer/config.h` | `40*1024` |
 | Классы / геометрия входа | `ml/model.py` | off/red_on/white_on, 24×24×3 |
+| Буфер камеры (PSRAM/DRAM) | `CameraWebServer.ino` | PSRAM `fb_count=2` если есть, иначе DRAM `1` |
 | Порты дашборда | флаги `-esp` / `-http` | `:9000` / `:8080` |
