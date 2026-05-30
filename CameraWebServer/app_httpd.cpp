@@ -546,10 +546,12 @@ static esp_err_t status_handler(httpd_req_t *req) {
   led_roi_t droi = ledDetectorGetRoi();
   p += snprintf(p, end - p,
                 ",\"det_enabled\":%d,\"det_state\":\"%s\",\"det_conf\":%.2f,"
-                "\"det_roi\":[%u,%u,%u,%u],\"tcp_host\":\"%s\",\"tcp_port\":%u,"
+                "\"det_roi\":[%u,%u,%u,%u],\"det_fixexp\":%d,\"det_aec_value\":%d,"
+                "\"det_agc_gain\":%d,\"tcp_host\":\"%s\",\"tcp_port\":%u,"
                 "\"tcp_connected\":%d",
                 ledDetectorIsEnabled() ? 1 : 0, led_state_name(ledDetectorCurrentState()),
                 ledDetectorCurrentConfidence(), droi.x, droi.y, droi.w, droi.h,
+                ledDetectorFixedExpEnabled() ? 1 : 0, ledDetectorAecValue(), ledDetectorAgcGain(),
                 tcpReporterHost(), tcpReporterPort(), tcpReporterConnected() ? 1 : 0);
   *p++ = '}';
   *p++ = 0;
@@ -601,19 +603,38 @@ static esp_err_t detcfg_handler(httpd_req_t *req) {
       ledDetectorSetEnabled(en);
       prefs.putBool(DET_NVS_EN, en);
     }
+
+    // Fixed exposure lock (so deployment matches the training capture).
+    bool fixexp = ledDetectorFixedExpEnabled();
+    int aecval = ledDetectorAecValue();
+    int agcgain = ledDetectorAgcGain();
+    bool exp_changed = false;
+    if (httpd_query_key_value(buf, "fixexp", v, sizeof(v)) == ESP_OK) {
+      fixexp = atoi(v) != 0; prefs.putBool(DET_NVS_FIXEXP, fixexp); exp_changed = true;
+    }
+    if (httpd_query_key_value(buf, "aec_value", v, sizeof(v)) == ESP_OK) {
+      aecval = atoi(v); prefs.putUShort(DET_NVS_AECVAL, (uint16_t)aecval); exp_changed = true;
+    }
+    if (httpd_query_key_value(buf, "agc_gain", v, sizeof(v)) == ESP_OK) {
+      agcgain = atoi(v); prefs.putUChar(DET_NVS_AGCGAIN, (uint8_t)agcgain); exp_changed = true;
+    }
+    if (exp_changed) ledDetectorSetFixedExposure(fixexp, aecval, agcgain);
+
     if (roi_changed) ledDetectorSetRoi(&roi);
     prefs.end();
     free(buf);
   }
 
   led_roi_t roi = ledDetectorGetRoi();
-  char json[256];
+  char json[320];
   int n = snprintf(json, sizeof(json),
                    "{\"enabled\":%d,\"host\":\"%s\",\"port\":%u,"
                    "\"roi\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},"
+                   "\"fixexp\":%d,\"aec_value\":%d,\"agc_gain\":%d,"
                    "\"state\":\"%s\",\"conf\":%.2f,\"tcp_connected\":%d}",
                    ledDetectorIsEnabled() ? 1 : 0, tcpReporterHost(), tcpReporterPort(),
                    roi.x, roi.y, roi.w, roi.h,
+                   ledDetectorFixedExpEnabled() ? 1 : 0, ledDetectorAecValue(), ledDetectorAgcGain(),
                    led_state_name(ledDetectorCurrentState()), ledDetectorCurrentConfidence(),
                    tcpReporterConnected() ? 1 : 0);
   httpd_resp_set_type(req, "application/json");

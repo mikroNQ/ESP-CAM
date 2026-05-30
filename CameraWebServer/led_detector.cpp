@@ -34,6 +34,12 @@ portMUX_TYPE g_cfg_mux = portMUX_INITIALIZER_UNLOCKED;
 led_roi_t g_roi = {DET_DEFAULT_ROI_X, DET_DEFAULT_ROI_Y, DET_DEFAULT_ROI_W, DET_DEFAULT_ROI_H};
 volatile bool g_enabled = false;
 
+// Fixed exposure/gain/white-balance lock (see config.h). Re-asserted by the
+// detector task because the sensor reverts to auto after a camera stall.
+volatile bool g_fixexp_enabled = false;
+volatile int g_aec_value = DET_DEFAULT_AEC_VALUE;
+volatile int g_agc_gain = DET_DEFAULT_AGC_GAIN;
+
 // Debounced state machine.
 led_state_t g_committed_state = LED_STATE_OFF;
 uint32_t g_committed_since_ms = 0;
@@ -85,6 +91,34 @@ led_roi_t ledDetectorGetRoi(void) {
 
 led_state_t ledDetectorCurrentState(void) { return g_cur_state; }
 float ledDetectorCurrentConfidence(void) { return g_cur_conf; }
+
+// ---------------------------------------------------------------------------
+// Fixed exposure lock — force manual exposure/gain and disable auto white
+// balance so deployment matches the dataset's capture conditions.
+// ---------------------------------------------------------------------------
+static void apply_fixed_exposure(void) {
+  if (!g_fixexp_enabled) return;
+  sensor_t *s = esp_camera_sensor_get();
+  if (!s) return;
+  s->set_exposure_ctrl(s, 0);        // AEC off => manual exposure
+  s->set_aec2(s, 0);
+  s->set_aec_value(s, g_aec_value);
+  s->set_gain_ctrl(s, 0);            // AGC off => manual gain
+  s->set_agc_gain(s, g_agc_gain);
+  s->set_whitebal(s, 0);             // AWB off => fixed white balance
+  s->set_awb_gain(s, 0);
+}
+
+void ledDetectorSetFixedExposure(bool enabled, int aec_value, int agc_gain) {
+  g_aec_value = aec_value;
+  g_agc_gain = agc_gain;
+  g_fixexp_enabled = enabled;
+  apply_fixed_exposure();
+}
+
+bool ledDetectorFixedExpEnabled(void) { return g_fixexp_enabled; }
+int ledDetectorAecValue(void) { return g_aec_value; }
+int ledDetectorAgcGain(void) { return g_agc_gain; }
 
 // ---------------------------------------------------------------------------
 // Preprocess: crop ROI from the RGB565 frame, box-downscale to the model input
@@ -224,9 +258,17 @@ static void detector_task(void *arg) {
   (void)arg;
   TickType_t last_wake = xTaskGetTickCount();
   const TickType_t period = pdMS_TO_TICKS(DET_SAMPLE_INTERVAL_MS);
+  // Re-assert the fixed exposure roughly every 2 s. Done before the enabled
+  // check so the lock also holds while the detector is paused (e.g. during
+  // dataset collection). The sensor reverts to auto after a camera stall.
+  const uint32_t reassert_every = 2000 / DET_SAMPLE_INTERVAL_MS;
+  uint32_t reassert_ctr = 0;
 
   for (;;) {
     vTaskDelayUntil(&last_wake, period);
+    if (g_fixexp_enabled && (++reassert_ctr % reassert_every == 0)) {
+      apply_fixed_exposure();
+    }
     if (!g_enabled || !g_model_ready) continue;
 
     camera_fb_t *fb = esp_camera_fb_get();

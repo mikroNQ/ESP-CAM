@@ -37,6 +37,20 @@
 #define DET_DEFAULT_ENABLED    1   // detector task active by default
 
 // ---------------------------------------------------------------------------
+// Fixed exposure / gain / white-balance.
+// The classifier is trained on frames captured with these LOCKED. If the sensor
+// runs in auto, it brightens 'off' (merging it with the on-states) and its
+// auto-white-balance neutralises the red/white colour difference — so deploy
+// MUST reproduce the capture conditions. Applied at boot and re-asserted by the
+// detector task (~2 s), because the sensor reverts to auto after a camera stall.
+// Tunable at runtime via /detcfg?fixexp=..&aec_value=..&agc_gain=.. (saved to
+// NVS) so values can change without reflashing.
+// ---------------------------------------------------------------------------
+#define DET_DEFAULT_FIXEXP    1    // 1 => hold the fixed exposure below
+#define DET_DEFAULT_AEC_VALUE 250  // manual exposure register (dataset value)
+#define DET_DEFAULT_AGC_GAIN  0    // manual gain (0 = lowest)
+
+// ---------------------------------------------------------------------------
 // TFLite-Micro tensor arena. Start generous, trim using arena_used_bytes()
 // reported at boot. No PSRAM => this lives in DRAM (BSS), keep it small.
 // ---------------------------------------------------------------------------
@@ -57,3 +71,6 @@
 #define DET_NVS_ROI_W "roi_w"
 #define DET_NVS_ROI_H "roi_h"
 #define DET_NVS_EN    "enabled"
+#define DET_NVS_FIXEXP  "fixexp"
+#define DET_NVS_AECVAL  "aecval"
+#define DET_NVS_AGCGAIN "agcgain"

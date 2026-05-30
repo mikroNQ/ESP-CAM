@@ -59,6 +59,17 @@ void ledDetectorSetRoi(const led_roi_t *roi);
 led_roi_t ledDetectorGetRoi(void);
 bool ledDetectorIsEnabled(void);
 
+// Fixed-exposure lock so deployment reproduces the training capture conditions.
+// When enabled, the detector forces manual exposure (aec_value) and gain
+// (agc_gain) and disables auto white balance on the sensor, and the detector
+// task re-asserts it periodically (the sensor reverts to auto after a stall).
+// Applies immediately. Pass the desired aec_value (exposure register) and
+// agc_gain; ignored for the actual sensor when enabled is false.
+void ledDetectorSetFixedExposure(bool enabled, int aec_value, int agc_gain);
+bool ledDetectorFixedExpEnabled(void);
+int ledDetectorAecValue(void);
+int ledDetectorAgcGain(void);
+
 // Current observed state and confidence (for /status).
 led_state_t ledDetectorCurrentState(void);
 float ledDetectorCurrentConfidence(void);

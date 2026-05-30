@@ -20,6 +20,9 @@ static led_roi_t det_roi = {DET_DEFAULT_ROI_X, DET_DEFAULT_ROI_Y, DET_DEFAULT_RO
 static bool det_enabled = DET_DEFAULT_ENABLED;
 static char det_host[64] = DET_DEFAULT_API_HOST;
 static uint16_t det_port = DET_DEFAULT_API_PORT;
+static bool det_fixexp = DET_DEFAULT_FIXEXP;
+static uint16_t det_aecval = DET_DEFAULT_AEC_VALUE;
+static uint8_t det_agcgain = DET_DEFAULT_AGC_GAIN;
 
 static void loadDetectorConfig() {
   Preferences p;
@@ -35,6 +38,9 @@ static void loadDetectorConfig() {
   det_roi.w = p.getUShort(DET_NVS_ROI_W, det_roi.w);
   det_roi.h = p.getUShort(DET_NVS_ROI_H, det_roi.h);
   det_enabled = p.getBool(DET_NVS_EN, det_enabled);
+  det_fixexp = p.getBool(DET_NVS_FIXEXP, det_fixexp);
+  det_aecval = p.getUShort(DET_NVS_AECVAL, det_aecval);
+  det_agcgain = p.getUChar(DET_NVS_AGCGAIN, det_agcgain);
   p.end();
 }
 
@@ -130,6 +136,11 @@ void setup() {
 
   // On-device LED detector + TCP reporter.
   loadDetectorConfig();
+  // Lock exposure/gain/white-balance to the dataset's capture conditions before
+  // the detector starts classifying (independent of detector init success).
+  ledDetectorSetFixedExposure(det_fixexp, det_aecval, det_agcgain);
+  Serial.printf("Fixed exposure %s (aec_value=%u, agc_gain=%u, awb off)\n",
+                det_fixexp ? "ON" : "off", det_aecval, det_agcgain);
   if (ledDetectorInit(&det_roi, det_enabled)) {
     ledDetectorStart();
     tcpReporterInit(det_host, det_port);
