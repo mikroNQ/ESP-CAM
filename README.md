@@ -1,6 +1,23 @@
-# ESP32-CAM HTTP-стрим с WiFiManager
+# ESP32-CAM: детектор подсветки сканера + веб-дашборд
 
-Прошивка для AI-Thinker ESP32-CAM (или клона на WROOM-32 + OV2640/OV3660). Сборка на базе примера `CameraWebServer` из ESP32 Arduino core 3.3.8 с заменой хардкоженных WiFi-credentials на [tzapu/WiFiManager](https://github.com/tzapu/WiFiManager) — при первом старте поднимается captive portal, сетку выбираешь через браузер.
+Камера ESP32-CAM смотрит на сканер штрихкодов и прямо на плате распознаёт цвет
+горящей подсветки (**красная / белая / выключено**) крошечной нейросетью,
+замеряет длительность каждого состояния и шлёт события по TCP. Go-сервис на ПК
+принимает их и показывает живой веб-дашборд с таймерами.
+
+```
+[ Сканер ] → [ ESP32-CAM: ML-детектор + тайминги ] → TCP → [ esp-dashboard ] → браузер
+   подсветка     red_on / white_on / off                     :9000           :8080
+```
+
+> 👵 **Просто запустить и смотреть** (от включения камеры до страницы в браузере,
+> без терминов) → [docs/QUICKSTART.md](docs/QUICKSTART.md).
+> 🔧 **Настроить с нуля** (прошивка → прицеливание → сбор → обучение) →
+> [docs/led-detector-guide.md](docs/led-detector-guide.md).
+
+Прошивка — на базе примера `CameraWebServer` из ESP32 Arduino core 3.3.8 с
+заменой хардкоженных WiFi-credentials на [tzapu/WiFiManager](https://github.com/tzapu/WiFiManager):
+при первом старте поднимается captive portal, сетку выбираешь через браузер.
 
 ## Что собиралось
 
@@ -125,13 +142,24 @@ Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH34
 
 ```
 http://<cam-ip>/detcfg?host=<api-ip>&port=9000&enable=1
-http://<cam-ip>/detcfg?roi_x=16&roi_y=40&roi_w=128&roi_h=40   # подстроить ROI под линию
-http://<cam-ip>/detcfg                                         # просто прочитать текущую конфигурацию
+http://<cam-ip>/detcfg?roi_x=18&roi_y=37&roi_w=124&roi_h=12       # ROI по линии
+http://<cam-ip>/detcfg?fixexp=1&aec_value=1300&agc_gain=0         # фикс. экспозиция
+http://<cam-ip>/detcfg                                            # прочитать конфигурацию
 ```
+
+**Фиксированная экспозиция (важно для распознавания).** Прошивка сама держит
+ручную экспозицию/усиление и выключает авто-баланс белого — на старте и
+переустанавливая каждые ~2с (сенсор сбрасывается в авто после подвисаний). Без
+этого авто-экспозиция «подтянула» бы яркость и `off` слился бы с `on`, а
+авто-WB схлопнул бы разницу красный/белый. Значения (`fixexp`, `aec_value`,
+`agc_gain`) хранятся в NVS и меняются через `/detcfg` без перепрошивки. Важно:
+**датасет должен сниматься при тех же значениях**, при которых работает детектор.
+Подсветка сканера часто импульсная — при короткой выдержке линия «мерцает»;
+поднимай `aec_value`, пока ON не станет стабильным (дефолт `1300`).
 
 Чтобы **прицелиться визуально**, открой `http://<cam-ip>/capture?roi=1` — кадр вернётся с зелёной рамкой текущего ROI поверх изображения. Меняй ROI через `/detcfg` и обновляй страницу, пока рамка не ляжет ровно на линию светодиодов.
 
-Дефолты (endpoint, ROI, частота, дебаунс, размер арены) — в [`CameraWebServer/config.h`](CameraWebServer/config.h). Поля детектора также добавлены в `/status`.
+Дефолты (endpoint, ROI, экспозиция, частота, дебаунс, размер арены) — в [`CameraWebServer/config.h`](CameraWebServer/config.h). Поля детектора (`det_*`) также добавлены в `/status`.
 
 Проверить выход без своего API можно netcat-ом:
 
@@ -142,45 +170,68 @@ nc -lk 0.0.0.0 9000
 
 ### Сбор датасета и обучение модели (`ml/`)
 
-В репозиторий закоммичена **bootstrap-модель** (`CameraWebServer/led_model.h`) — со случайными весами: прошивка собирается и весь тракт (тайминги + TCP) работает сразу, но классифицирует мусор, пока не обучишь на реальных кадрах.
+В `CameraWebServer/led_model.h` лежит **обученная** модель (классы `off` /
+`red_on` / `white_on`). Чтобы переобучить под свою сцену/сканеры:
 
-**0. Подготовка камеры.** Прошей ESP32-CAM, жёстко зафиксируй её напротив сканера. Подгони ROI ровно по линии светодиодов и **зафиксируй экспозицию** (иначе авто-AGC «подтянет» яркость и `off`/`red` сольются):
+**0. Подготовка.** Прошей ESP32-CAM, жёстко зафиксируй её напротив сканера,
+подгони ROI по линии (`/capture?roi=1` + `/detcfg?roi_x=..`) и зафиксируй
+экспозицию (`/detcfg?fixexp=1&aec_value=1300&agc_gain=0`) — см. раздел про
+`/detcfg` выше. **Снимай датасет при той же экспозиции, что и работает детектор.**
 
-```bash
-# ROI по линии (сверяйся с http://<cam-ip>/bmp — живой кадр):
-curl "http://<cam-ip>/detcfg?roi_x=16&roi_y=40&roi_w=128&roi_h=40"
-# фиксируем экспозицию/усиление/баланс белого:
-curl "http://<cam-ip>/control?var=aec&val=0"
-curl "http://<cam-ip>/control?var=agc&val=0"
-curl "http://<cam-ip>/control?var=awb&val=0"
-curl "http://<cam-ip>/control?var=aec_value&val=300"   # подбери под свою сцену
-```
-
-**1. Снять кадры (авто-разметка по цвету).** `collect.py --auto` снимает потоком и сам раскладывает кропы по `off`/`red`/`white` (сомнительные → `_unsure`):
+**1. Снять кадры по сессиям** — `collect_session.py`. На этой задаче цветовая
+авто-эвристика `collect.py` не разделяет red/white (горящая линия читается почти
+нейтрально из-за зелёного bias сенсора), зато ON/OFF надёжно различимы по
+яркости, а тип сканера известен на сессию. Поэтому держишь одно состояние и
+снимаешь его меткой; гейт по яркости отсеивает кадры, где подсветка мигнула:
 
 ```bash
 cd ml
 pip install -r requirements.txt
-python collect.py --host <cam-ip> --auto --count 600
+# красный сканер горит:
+python collect_session.py --host <cam-ip> --label red_on   --min-v 75 --lock-aec 1300 --count 300
+# белый сканер горит:
+python collect_session.py --host <cam-ip> --label white_on --min-v 85 --lock-aec 1300 --count 300
+# подсветка выключена:
+python collect_session.py --host <cam-ip> --label off      --max-v 78 --lock-aec 1300 --count 300
 ```
 
-Пороги эвристики можно подстроить: `--off-v`, `--red-margin`, `--white-min`. Если состояние удобнее снимать вручную — есть режим `--label off|red|white`.
+`--lock-aec` периодически переустанавливает фикс-экспозицию (на случай сброса
+сенсора). Кадры тянутся с `/capture` (JPEG, ~0.5с) — быстрее, чем `/bmp`.
 
-**2. Проверить разметку.** Просмотрщик показывает каждый кроп увеличенным с подсказкой эвристики; клавишами `o/r/w` правишь метку, `d` — удалить. Начни с папки `_unsure`:
+**2. Обучить и сгенерировать `led_model.h` (int8):**
 
 ```bash
-python review.py
+python train.py --epochs 40
 ```
 
-**3. Обучить и сгенерировать `led_model.h` (int8):**
+**3. Перекомпилировать и перепрошить** firmware — модель встроена в `led_model.h`.
+
+> Альтернатива для непрерывной подсветки — `collect.py` (`--auto` с цветовой
+> эвристикой или `--label`) + `review.py` (правка меток в Tkinter). Вспомогательное:
+> `make_bootstrap.py` пересоздаёт пустую модель; `convert_to_header.py` конвертит
+> `.tflite` в `led_model.h`. Порядок классов и геометрия входа едины в
+> [`ml/model.py`](ml/model.py); ресемплинг при обучении (`Image.BOX`) совпадает с
+> box-усреднением в прошивке.
+
+## Веб-дашборд таймингов (`dashboard/`)
+
+Go-сервис на stdlib принимает NDJSON-события от прошивки по TCP и показывает в
+браузере живой дашборд: текущее состояние с цветным индикатором и секундомером,
+статистику по классам (последнее / среднее / макс / счётчик) и лог переходов с
+длительностями. Обновления идут через **Server-Sent Events** — минимальная
+задержка (ограничена дебаунсом прошивки, ~25 мс), без внешних зависимостей.
 
 ```bash
-python train.py --epochs 30
+cd dashboard
+go build -o esp-dashboard.exe .
+./esp-dashboard.exe -esp=:9000 -http=:8080
+# направить прошивку на этот ПК:
+curl "http://<cam-ip>/detcfg?host=<pc-ip>&port=9000"
+# открыть http://<pc-ip>:8080
 ```
 
-**4. Перекомпилировать и перепрошить** firmware — модель встроена в `led_model.h`.
-
-Вспомогательное: `autolabel.py` — эвристика цвета (общая для collect/review); `make_bootstrap.py` пересоздаёт пустую модель; `convert_to_header.py` конвертит любой `.tflite` в `led_model.h`. Порядок классов и геометрия входа едины в [`ml/model.py`](ml/model.py); ресемплинг при обучении (`Image.BOX`) совпадает с box-усреднением в прошивке.
+Подробности — в [`dashboard/README.md`](dashboard/README.md). Простой запуск
+«для бабушки» — в [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ## Структура
 
@@ -191,7 +242,7 @@ CameraWebServer/
 ├── config.h               # дефолты детектора/репортера + ключи NVS
 ├── led_detector.h/.cpp    # TFLM-инференс по ROI, машина состояний, тайминги
 ├── tcp_reporter.h/.cpp    # постоянный TCP-сокет, NDJSON, реконнект с backoff
-├── led_model.h            # сгенерированная int8-модель (bootstrap; см. ml/)
+├── led_model.h            # обученная int8-модель (off/red_on/white_on; см. ml/)
 ├── board_config.h         # выбор модели — здесь CAMERA_MODEL_AI_THINKER
 ├── camera_pins.h          # GPIO-маппинг для всех поддерживаемых плат
 ├── camera_index.h         # gzip'нутый HTML интерфейса
@@ -199,13 +250,20 @@ CameraWebServer/
 
 ml/                        # Python-пайплайн: сбор данных → обучение → led_model.h
 ├── model.py               # архитектура + int8-квантизация (единый источник правды)
-├── autolabel.py           # эвристика цвета для авто-разметки
+├── collect_session.py     # сбор по сессиям с /capture + гейт по яркости (основной)
+├── autolabel.py           # эвристика цвета для авто-разметки (collect.py)
 ├── collect.py             # выгрузка ROI с /bmp (--auto / --label)
 ├── review.py              # Tkinter-просмотрщик для правки меток
 ├── train.py               # обучение + генерация led_model.h
 ├── make_bootstrap.py      # пустая модель со случайными весами
 ├── convert_to_header.py   # .tflite → led_model.h
 └── requirements.txt
+
+dashboard/                 # Go-сервис: приём TCP-событий + веб-дашборд таймингов
+├── main.go                # TCP-приёмник + HTTP/SSE
+├── index.html             # фронтенд (встроен через go:embed)
+├── go.mod
+└── README.md
 
 relay/                     # Go-сервис: MJPEG fan-out на N клиентов (см. relay/README.md)
 ├── main.go
