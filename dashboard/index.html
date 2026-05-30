@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сканер · тайминги подсветки</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --panel2:#1d222b; --line:#2a313c;
+    --txt:#e6eaf0; --dim:#8b95a5; --accent:#56b6ff;
+    --off:#6b7280; --red:#ff4d4f; --white:#cdddff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px}
+  h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.2px}
+  h1 span{color:var(--dim);font-weight:400}
+  .conn{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--off);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot.ok{background:#3ddc84;box-shadow:0 0 10px #3ddc8455}
+  .dot.bad{background:var(--red)}
+
+  .hero{border:1px solid var(--line);border-radius:16px;padding:26px 28px;margin-bottom:16px;
+    background:radial-gradient(120% 140% at 0% 0%, var(--tint,#222a) 0%, var(--panel) 60%);
+    transition:background .25s ease}
+  .hero .label{font-size:13px;text-transform:uppercase;letter-spacing:2px;color:var(--dim)}
+  .state{display:flex;align-items:baseline;gap:16px;margin-top:6px;flex-wrap:wrap}
+  .state .name{font-size:40px;font-weight:700;letter-spacing:.5px}
+  .chipdot{width:16px;height:16px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:10px}
+  .timer{margin-left:auto;font-variant-numeric:tabular-nums;font-size:54px;font-weight:700;letter-spacing:1px}
+  .sub{margin-top:8px;color:var(--dim);font-size:13px}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h3{margin:0 0 12px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;color:var(--txt)}
+  .rows{display:grid;grid-template-columns:auto auto;gap:6px 12px;font-variant-numeric:tabular-nums}
+  .rows .k{color:var(--dim);font-size:13px}
+  .rows .v{text-align:right;font-weight:600}
+  .big{font-size:22px}
+
+  .log{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .log h3{margin:0;padding:14px 16px;font-size:13px;border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  td,th{padding:9px 16px;text-align:left;font-size:13.5px;border-bottom:1px solid #20262f}
+  th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  tr:last-child td{border-bottom:none}
+  td.dur{text-align:right;font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:12px;
+    background:#222834;border:1px solid var(--line)}
+  .pill .d{width:8px;height:8px;border-radius:50%}
+  .arrow{color:var(--dim);margin:0 6px}
+  .empty{padding:22px 16px;color:var(--dim);text-align:center}
+  .muted{color:var(--dim)}
+  .drop{color:#ffae57}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}.timer{font-size:40px}.state .name{font-size:32px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Сканер · <span>тайминги подсветки</span></h1>
+    <div class="conn"><span id="dot" class="dot"></span><span id="connTxt">подключение…</span></div>
+  </header>
+
+  <section class="hero" id="hero">
+    <div class="label">Текущее состояние</div>
+    <div class="state">
+      <div class="name"><span class="chipdot" id="curDot"></span><span id="curName">—</span></div>
+      <div class="timer" id="timer">0.00</div>
+    </div>
+    <div class="sub" id="curSub">ожидание событий…</div>
+  </section>
+
+  <div class="grid" id="stats"></div>
+
+  <div class="log">
+    <h3>Последние переходы</h3>
+    <table>
+      <thead><tr><th>Время</th><th>Переход</th><th>Длилось (from)</th><th>conf</th></tr></thead>
+      <tbody id="logBody"><tr><td class="empty" colspan="4">пока пусто</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const META = {
+  off:      {name:"ВЫКЛ",    color:"var(--off)",   raw:"#6b7280", tint:"rgba(107,114,128,.18)"},
+  red_on:   {name:"КРАСНЫЙ", color:"var(--red)",   raw:"#ff4d4f", tint:"rgba(255,77,79,.20)"},
+  white_on: {name:"БЕЛЫЙ",   color:"var(--white)", raw:"#cdddff", tint:"rgba(205,221,255,.16)"},
+};
+const meta = s => META[s] || {name:s||"—", color:"var(--dim)", raw:"#8b95a5", tint:"rgba(120,130,150,.12)"};
+
+let snap=null, sinceLocal=0;
+
+function durMs(ms){
+  if(ms==null) return "—";
+  if(ms<1000) return ms+" мс";
+  const s=ms/1000;
+  if(s<60) return s.toFixed(2)+" с";
+  const m=Math.floor(s/60), r=s-m*60;
+  return m+":"+r.toFixed(1).padStart(4,"0")+" мин";
+}
+function liveFmt(sec){
+  if(sec<60) return sec.toFixed(2);
+  const m=Math.floor(sec/60), r=sec-m*60;
+  return m+":"+r.toFixed(1).padStart(4,"0");
+}
+function clock(ms){
+  const d=new Date(ms);
+  return d.toLocaleTimeString("ru-RU",{hour12:false})+"."+String(d.getMilliseconds()).padStart(3,"0").slice(0,2);
+}
+
+const es = new EventSource("/events");
+es.addEventListener("snap", e=>{ snap=JSON.parse(e.data); onSnap(); });
+es.onopen = ()=> setSSE(true);
+es.onerror = ()=> setSSE(false);
+
+function setSSE(ok){
+  if(!ok){ document.getElementById("dot").className="dot bad"; document.getElementById("connTxt").textContent="сервер недоступен"; }
+}
+function onSnap(){
+  // Синхронизируем «начало текущего состояния» с локальными часами браузера.
+  const elapsedServer = snap.now_ms - snap.since_ms;
+  sinceLocal = Date.now() - elapsedServer;
+  render();
+}
+
+function render(){
+  // Связь
+  const dot=document.getElementById("dot"), ct=document.getElementById("connTxt");
+  if(snap.connected){ dot.className="dot ok"; ct.textContent = "ESP подключена" + (snap.ip?" · "+snap.ip:""); }
+  else { dot.className="dot bad"; ct.textContent="ESP не подключена"; }
+
+  // Герой
+  const m=meta(snap.current);
+  document.getElementById("hero").style.setProperty("--tint", m.tint);
+  document.getElementById("curName").textContent=m.name;
+  document.getElementById("curDot").style.background=m.color;
+  document.getElementById("timer").style.color=m.color;
+  const conf = snap.cur_conf ? "conf "+(snap.cur_conf*100).toFixed(0)+"%" : "";
+  const drop = snap.dropped ? ' · <span class="drop">потеряно событий: '+snap.dropped+'</span>' : "";
+  document.getElementById("curSub").innerHTML = (conf||"&nbsp;") + drop;
+
+  // Статистика по классам
+  const order=["red_on","white_on","off"];
+  document.getElementById("stats").innerHTML = order.map(st=>{
+    const m=meta(st), s=(snap.stats&&snap.stats[st])||{count:0,total_ms:0,last_ms:0,max_ms:0};
+    const avg=s.count? s.total_ms/s.count : null;
+    return `<div class="card"><h3><span class="chipdot" style="width:11px;height:11px;background:${m.color}"></span>${m.name}</h3>
+      <div class="rows">
+        <div class="k">Последнее</div><div class="v big">${s.count?durMs(s.last_ms):"—"}</div>
+        <div class="k">Среднее</div><div class="v">${avg!=null?durMs(Math.round(avg)):"—"}</div>
+        <div class="k">Максимум</div><div class="v">${s.count?durMs(s.max_ms):"—"}</div>
+        <div class="k">Сколько раз</div><div class="v">${s.count}</div>
+      </div></div>`;
+  }).join("");
+
+  // Лог переходов (новейшие сверху)
+  const body=document.getElementById("logBody");
+  const h=(snap.history||[]).slice().reverse();
+  if(!h.length){ body.innerHTML='<tr><td class="empty" colspan="4">пока пусто</td></tr>'; return; }
+  body.innerHTML = h.map(t=>{
+    const f=meta(t.from), to=meta(t.to);
+    return `<tr>
+      <td class="muted">${clock(t.at_ms)}</td>
+      <td><span class="pill"><span class="d" style="background:${f.color}"></span>${f.name}</span>
+          <span class="arrow">→</span>
+          <span class="pill"><span class="d" style="background:${to.color}"></span>${to.name}</span></td>
+      <td class="dur">${durMs(t.dur_ms)}</td>
+      <td class="muted">${(t.conf*100).toFixed(0)}%</td>
+    </tr>`;
+  }).join("");
+}
+
+// Живой таймер текущего состояния — тикает локально между событиями.
+setInterval(()=>{
+  if(!snap) return;
+  document.getElementById("timer").textContent = liveFmt((Date.now()-sinceLocal)/1000);
+}, 50);
+</script>
+</body>
+</html>
