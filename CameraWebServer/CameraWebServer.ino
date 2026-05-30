@@ -72,15 +72,23 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  // RGB565 @ QQVGA in DRAM: the on-device ML detector needs raw pixels, and on
-  // this no-PSRAM board a small RGB565 frame is the only thing that fits. The
-  // MJPEG /stream and /capture handlers JPEG-encode this buffer on the fly.
+  // RGB565 @ QQVGA: the on-device ML detector needs raw pixels; /stream and
+  // /capture JPEG-encode this buffer on the fly.
   config.pixel_format = PIXFORMAT_RGB565;
   config.frame_size = FRAMESIZE_QQVGA;  // 160x120, matches DET_FRAME_W/H
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  config.fb_location = CAMERA_FB_IN_DRAM;
   config.jpeg_quality = 12;
-  config.fb_count = 1;
+  if (psramFound()) {
+    // Double-buffer in PSRAM: the detector task and the HTTP handlers stop
+    // fighting over a single framebuffer (the source of the stalls), and
+    // GRAB_LATEST hands the detector the freshest frame without blocking.
+    config.fb_location = CAMERA_FB_IN_PSRAM;
+    config.fb_count = 2;
+    config.grab_mode = CAMERA_GRAB_LATEST;
+  } else {
+    config.fb_location = CAMERA_FB_IN_DRAM;
+    config.fb_count = 1;
+    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  }
 
 #if defined(CAMERA_MODEL_ESP_EYE)
   pinMode(13, INPUT_PULLUP);
