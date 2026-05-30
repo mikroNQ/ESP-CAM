@@ -12,6 +12,8 @@
 
 > 👵 **Просто запустить и смотреть** (от включения камеры до страницы в браузере,
 > без терминов) → [docs/QUICKSTART.md](docs/QUICKSTART.md).
+> 📋 **Шпаргалка команд** (прошивка, камера, сбор, обучение, дашборд, git) →
+> [docs/CHEATSHEET.md](docs/CHEATSHEET.md).
 > 🔧 **Настроить с нуля** (прошивка → прицеливание → сбор → обучение) →
 > [docs/led-detector-guide.md](docs/led-detector-guide.md).
 
