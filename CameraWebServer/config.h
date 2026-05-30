@@ -32,7 +32,8 @@
 // Detector behaviour.
 // ---------------------------------------------------------------------------
 #define DET_SAMPLE_INTERVAL_MS 25  // ~40 Hz inference cadence
-#define DET_DEBOUNCE_COUNT     2   // identical classifications before committing
+#define DET_DEBOUNCE_COUNT     1   // identical classifications before committing
+                                   // (1 = commit on first frame, ~25ms latency)
 #define DET_CONF_THRESHOLD     0.60f  // min softmax confidence to accept a class
 #define DET_DEFAULT_ENABLED    1   // detector task active by default
 
