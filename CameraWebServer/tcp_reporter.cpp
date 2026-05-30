@@ -6,6 +6,8 @@
 #include <WiFiClient.h>
 #include <string.h>
 #include "esp_random.h"
+#include "esp_timer.h"
+#include "esp_system.h"
 
 #include "config.h"
 #include "led_detector.h"
@@ -61,6 +63,7 @@ static void reporter_task(void *arg) {
   QueueHandle_t q = ledDetectorEventQueue();
   uint32_t backoff_ms = 500;
   const uint32_t backoff_max = 30000;
+  uint32_t idle_ticks = 0;
   char line[192];
 
   for (;;) {
@@ -119,13 +122,24 @@ static void reporter_task(void *arg) {
         g_client.stop();
         g_connected = false;
       }
-    } else {
-      // Idle keepalive: a bare newline detects a dead peer cheaply.
-      if (g_client.connected()) {
-        if (g_client.write((const uint8_t *)"\n", 1) != 1) {
-          g_client.stop();
-          g_connected = false;
-        }
+    } else if (g_client.connected()) {
+      // Idle: every ~3s send a status heartbeat (RSSI / uptime / heap) so the
+      // dashboard can show link quality; in between, a bare newline cheaply
+      // detects a dead peer. Both double as keepalive.
+      bool ok;
+      if (++idle_ticks % 3 == 0) {
+        int n = snprintf(line, sizeof(line),
+                         "{\"type\":\"status\",\"rssi\":%d,\"uptime_s\":%lu,\"heap\":%u}\n",
+                         (int)WiFi.RSSI(),
+                         (unsigned long)(esp_timer_get_time() / 1000000ULL),
+                         (unsigned)esp_get_free_heap_size());
+        ok = write_line(line, n);
+      } else {
+        ok = g_client.write((const uint8_t *)"\n", 1) == 1;
+      }
+      if (!ok) {
+        g_client.stop();
+        g_connected = false;
       }
     }
   }

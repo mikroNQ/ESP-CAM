@@ -54,6 +54,9 @@
   .empty{padding:22px 16px;color:var(--dim);text-align:center}
   .muted{color:var(--dim)}
   .drop{color:#ffae57}
+  .wifi{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+  .barbox{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+  .barbox i{width:3px;border-radius:1px;background:var(--line)}
   @media(max-width:680px){.grid{grid-template-columns:1fr}.timer{font-size:40px}.state .name{font-size:32px}}
 </style>
 </head>
@@ -61,7 +64,11 @@
 <div class="wrap">
   <header>
     <h1>Сканер · <span>тайминги подсветки</span></h1>
-    <div class="conn"><span id="dot" class="dot"></span><span id="connTxt">подключение…</span></div>
+    <div class="conn">
+      <span id="wifi" class="wifi"></span>
+      <span id="uptime" class="muted" style="font-size:12px"></span>
+      <span id="dot" class="dot"></span><span id="connTxt">подключение…</span>
+    </div>
   </header>
 
   <section class="hero" id="hero">
@@ -111,6 +118,27 @@ function clock(ms){
   const d=new Date(ms);
   return d.toLocaleTimeString("ru-RU",{hour12:false})+"."+String(d.getMilliseconds()).padStart(3,"0").slice(0,2);
 }
+function wifiInfo(rssi){
+  if(!rssi) return {q:"нет данных",bars:0,color:"var(--dim)"};
+  if(rssi>=-55) return {q:"отличный",bars:4,color:"#3ddc84"};
+  if(rssi>=-65) return {q:"хороший", bars:3,color:"#3ddc84"};
+  if(rssi>=-72) return {q:"средний", bars:2,color:"#ffae57"};
+  if(rssi>=-80) return {q:"слабый",  bars:1,color:"#ff7a45"};
+  return {q:"плохой",bars:0,color:"var(--red)"};
+}
+function renderWifi(rssi){
+  const w=wifiInfo(rssi);
+  const bars=[0,1,2,3].map(i=>`<i style="height:${5+i*3}px;background:${i<w.bars?w.color:'var(--line)'}"></i>`).join("");
+  const txt=rssi? `${rssi} dBm · ${w.q}` : "сигнал —";
+  document.getElementById("wifi").innerHTML=`<span class="barbox">${bars}</span><span>${txt}</span>`;
+}
+function upFmt(s){
+  if(!s) return "";
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  if(h) return `↑ ${h}ч ${m}м`;
+  if(m) return `↑ ${m}м`;
+  return `↑ ${s}с`;
+}
 
 const es = new EventSource("/events");
 es.addEventListener("snap", e=>{ snap=JSON.parse(e.data); onSnap(); });
@@ -132,6 +160,10 @@ function render(){
   const dot=document.getElementById("dot"), ct=document.getElementById("connTxt");
   if(snap.connected){ dot.className="dot ok"; ct.textContent = "ESP подключена" + (snap.ip?" · "+snap.ip:""); }
   else { dot.className="dot bad"; ct.textContent="ESP не подключена"; }
+
+  // WiFi-сигнал и аптайм ESP
+  renderWifi(snap.connected ? snap.rssi : 0);
+  document.getElementById("uptime").textContent = snap.connected ? upFmt(snap.uptime_s) : "";
 
   // Герой
   const m=meta(snap.current);

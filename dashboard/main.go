@@ -48,9 +48,12 @@ type rawEvent struct {
 	To    string  `json:"to"`
 	DurMs uint64  `json:"dur_ms"`
 	Conf  float64 `json:"conf"`
-	Dev   string  `json:"dev"`
-	IP    string  `json:"ip"`
-	Count int     `json:"count"`
+	Dev     string `json:"dev"`
+	IP      string `json:"ip"`
+	Count   int    `json:"count"`
+	Rssi    int    `json:"rssi"`
+	UptimeS uint64 `json:"uptime_s"`
+	Heap    uint64 `json:"heap"`
 }
 
 // transition — нормализованный переход для истории и веб-морды.
@@ -83,6 +86,9 @@ type snapshot struct {
 	SinceMs   int64                 `json:"since_ms"` // когда началось текущее состояние (серверное unix ms)
 	NowMs     int64                 `json:"now_ms"`   // серверное «сейчас» — для синхронизации часов браузера
 	Dropped   uint64                `json:"dropped"`
+	Rssi      int                   `json:"rssi"`     // WiFi RSSI ESP (dBm), 0 = неизвестно
+	UptimeS   uint64                `json:"uptime_s"`
+	Heap      uint64                `json:"heap"`
 	Stats     map[string]*stateStat `json:"stats"`
 	History   []transition          `json:"history"` // новейшие в конце
 }
@@ -139,6 +145,9 @@ type server struct {
 	since     time.Time
 	seq       uint64
 	dropped   uint64
+	rssi      int
+	uptimeS   uint64
+	heap      uint64
 	stats     map[string]*stateStat
 	history   []transition
 }
@@ -207,6 +216,11 @@ func (s *server) handleLine(b []byte) {
 		s.dropped += uint64(e.Count)
 		s.mu.Unlock()
 		s.pushSnapshot()
+	case e.Type == "status":
+		s.mu.Lock()
+		s.rssi, s.uptimeS, s.heap = e.Rssi, e.UptimeS, e.Heap
+		s.mu.Unlock()
+		s.pushSnapshot()
 	case e.Event == "transition":
 		s.applyTransition(e)
 	}
@@ -272,7 +286,8 @@ func (s *server) snap() snapshot {
 		Connected: s.conns > 0, Dev: s.dev, IP: s.ip,
 		Current: s.current, CurConf: s.curConf,
 		SinceMs: s.since.UnixMilli(), NowMs: time.Now().UnixMilli(),
-		Dropped: s.dropped, Stats: statsCopy, History: hist,
+		Dropped: s.dropped, Rssi: s.rssi, UptimeS: s.uptimeS, Heap: s.heap,
+		Stats: statsCopy, History: hist,
 	}
 }
 
