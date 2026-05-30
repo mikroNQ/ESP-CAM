@@ -1,10 +1,10 @@
 """Review/fix auto-labelled ROI crops before training.
 
-Walks ml/data/{_unsure,off,red,white}, shows each crop enlarged with its current
-folder label and the heuristic's suggestion, and lets you correct it fast.
+Walks ml/data/{_unsure,off,red_on,white_on}, shows each crop enlarged with its
+current folder label and the heuristic's suggestion, and lets you correct it fast.
 
 Keys:
-    o / r / w   move crop to off / red / white
+    o / r / w   move crop to off / red_on / white_on
     d           delete crop
     Right / n   next        Left / p   previous
     q / Esc     quit
@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "data")
 UNSURE_DIR = "_unsure"
 FOLDERS = [UNSURE_DIR] + CLASS_NAMES
-KEY_TO_LABEL = {"o": "off", "r": "red", "w": "white"}
+KEY_TO_LABEL = {"o": "off", "r": "red_on", "w": "white_on"}
 
 
 def list_items():

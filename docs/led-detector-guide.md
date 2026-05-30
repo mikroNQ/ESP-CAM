@@ -173,7 +173,7 @@ pip install -r requirements.txt
 ### 6.1 Снять кадры с авто-разметкой по цвету
 
 `collect.py --auto` снимает поток с камеры (`/bmp`), вырезает ROI и сам
-раскладывает кропы по `data/off`, `data/red`, `data/white`; неуверенные — в
+раскладывает кропы по `data/off`, `data/red_on`, `data/white_on`; неуверенные — в
 `data/_unsure`:
 
 ```bash
@@ -191,7 +191,7 @@ python collect.py --host <cam-ip> --auto --count 600 --off-v 45 --red-margin 20 
 ```
 
 Альтернатива: если состояние удобно изолировать руками —
-`python collect.py --host <cam-ip> --label red --count 200` (и так для каждого).
+`python collect.py --host <cam-ip> --label red_on --count 200` (и так для каждого).
 
 ### 6.2 Проверить и поправить разметку
 
@@ -199,7 +199,7 @@ python collect.py --host <cam-ip> --auto --count 600 --off-v 45 --red-margin 20 
 python review.py
 ```
 Откроется просмотрщик: увеличенный кроп + подсказка эвристики + статистика.
-- `o` / `r` / `w` — переметить в off / red / white,
+- `o` / `r` / `w` — переметить в off / red_on / white_on,
 - `d` — удалить,
 - `←` / `→` (или `n` / `p`) — навигация,
 - `q` / `Esc` — выход.
@@ -216,7 +216,7 @@ python train.py --epochs 30
 ```
 
 Скрипт:
-1. загрузит кропы из `data/{off,red,white}` (папка `_unsure` игнорируется),
+1. загрузит кропы из `data/{off,red_on,white_on}` (папка `_unsure` игнорируется),
 2. применит аугментацию (яркость, дрейф баланса белого, гамма, сдвиг
    кадрирования, шум) для устойчивости,
 3. обучит крошечную CNN,

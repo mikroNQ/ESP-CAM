@@ -1,6 +1,6 @@
 """Colour/brightness heuristic that auto-labels an LED-line ROI crop.
 
-Used by collect.py to pre-sort frames into off/red/white before you review
+Used by collect.py to pre-sort frames into off/red_on/white_on before you review
 them. It is intentionally simple — the CNN trained on the reviewed result is
 what generalises; this just removes most of the manual sorting.
 
@@ -36,7 +36,7 @@ def classify_roi(arr, off_v=DEFAULT_OFF_V, red_margin=DEFAULT_RED_MARGIN,
     if v < off_v:
         return "off", stats
     if redness > red_margin:
-        return "red", stats
+        return "red_on", stats
     if min(r, g, b) > white_min:
-        return "white", stats
+        return "white_on", stats
     return None, stats  # ambiguous -> review

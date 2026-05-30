@@ -3,8 +3,8 @@
 Pulls frames from the camera's /bmp endpoint and crops the configured ROI. Two
 modes:
 
-  --auto   : grab continuously and auto-sort each crop into off/red/white by the
-             colour heuristic (autolabel.py); ambiguous crops go to _unsure.
+  --auto   : grab continuously and auto-sort each crop into off/red_on/white_on
+             by the colour heuristic (autolabel.py); ambiguous crops go to _unsure.
              Then run review.py to fix mistakes. RECOMMENDED.
 
   --label X: save every crop into data/X/ (use when you can hold one LED state).
@@ -14,7 +14,7 @@ them to the model input with box filtering to match the firmware preprocessing.
 
 Examples:
     python collect.py --host 192.168.1.50 --auto --count 600
-    python collect.py --host 192.168.1.50 --label red --count 200
+    python collect.py --host 192.168.1.50 --label red_on --count 200
 
 The ROI defaults match config.h; override with --roi x y w h (query the camera's
 /detcfg to see the live ROI).
