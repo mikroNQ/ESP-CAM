@@ -48,6 +48,9 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+  // reset_reason 9=BROWNOUT (слабое питание!), 6/7=WDT, 4=PANIC, 1=POWERON.
+  Serial.printf("[boot] reset_reason=%d, free heap=%u\n",
+                (int)esp_reset_reason(), (unsigned)esp_get_free_heap_size());
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;

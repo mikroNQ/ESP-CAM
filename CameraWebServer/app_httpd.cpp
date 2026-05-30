@@ -23,6 +23,8 @@
 #include "camera_index.h"
 #include "board_config.h"
 #include <Preferences.h>
+#include <WiFi.h>
+#include "esp_system.h"
 #include "config.h"
 #include "led_detector.h"
 #include "tcp_reporter.h"
@@ -553,6 +555,17 @@ static esp_err_t status_handler(httpd_req_t *req) {
                 ledDetectorCurrentConfidence(), droi.x, droi.y, droi.w, droi.h,
                 ledDetectorFixedExpEnabled() ? 1 : 0, ledDetectorAecValue(), ledDetectorAgcGain(),
                 tcpReporterHost(), tcpReporterPort(), tcpReporterConnected() ? 1 : 0);
+  // Health diagnostics: distinguish "stalled" (uptime keeps growing) from
+  // "rebooted" (uptime resets; reset_reason shows brownout/panic) and watch the
+  // WiFi signal + heap. reset_reason: 1=POWERON 3=SW 4=PANIC 5=INT_WDT 6=TASK_WDT
+  // 7=WDT 8=DEEPSLEEP 9=BROWNOUT.
+  p += snprintf(p, end - p,
+                ",\"uptime_s\":%lu,\"free_heap\":%u,\"min_free_heap\":%u,"
+                "\"rssi\":%d,\"reset_reason\":%d",
+                (unsigned long)(esp_timer_get_time() / 1000000ULL),
+                (unsigned)esp_get_free_heap_size(),
+                (unsigned)esp_get_minimum_free_heap_size(),
+                (int)WiFi.RSSI(), (int)esp_reset_reason());
   *p++ = '}';
   *p++ = 0;
   httpd_resp_set_type(req, "application/json");
