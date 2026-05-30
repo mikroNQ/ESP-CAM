@@ -46,9 +46,11 @@
 // Tunable at runtime via /detcfg?fixexp=..&aec_value=..&agc_gain=.. (saved to
 // NVS) so values can change without reflashing.
 // ---------------------------------------------------------------------------
-#define DET_DEFAULT_FIXEXP    1    // 1 => hold the fixed exposure below
-#define DET_DEFAULT_AEC_VALUE 250  // manual exposure register (dataset value)
-#define DET_DEFAULT_AGC_GAIN  0    // manual gain (0 = lowest)
+#define DET_DEFAULT_FIXEXP    1     // 1 => hold the fixed exposure below
+#define DET_DEFAULT_AEC_VALUE 1300  // manual exposure register (dataset value):
+                                    // long enough to integrate the red scanner's
+                                    // slow LED strobe into a steady reading.
+#define DET_DEFAULT_AGC_GAIN  0     // manual gain (0 = lowest)
 
 // ---------------------------------------------------------------------------
 // TFLite-Micro tensor arena. Start generous, trim using arena_used_bytes()
