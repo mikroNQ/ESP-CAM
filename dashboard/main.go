@@ -177,7 +177,16 @@ func (s *server) handleESP(conn net.Conn) {
 
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 0, 4096), 1<<16)
-	for sc.Scan() {
+	// The firmware sends a keepalive "\n" every ~1s. If we see nothing for 5s the
+	// link is dead (e.g. ESP lost power without a TCP FIN). A read deadline turns
+	// that silence into a clean disconnect — otherwise a half-open socket blocks
+	// here forever, the connection count never drops and the UI shows a stale
+	// "ESP подключена". The deadline is refreshed before every read.
+	for {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if !sc.Scan() {
+			break
+		}
 		s.handleLine(sc.Bytes())
 	}
 }
