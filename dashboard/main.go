@@ -129,10 +129,11 @@ func (h *hub) broadcast(b []byte) {
 
 // server — состояние детектора и история, потокобезопасно.
 type server struct {
-	mu        sync.Mutex
-	hub       *hub
-	connected bool
-	dev, ip   string
+	mu      sync.Mutex
+	hub     *hub
+	conns   int // число активных TCP-подключений ESP (а не флаг: при reconnect
+	            // старый обработчик не должен «погасить» связь нового)
+	dev, ip string
 	current   string
 	curConf   float64
 	since     time.Time
@@ -167,10 +168,10 @@ func (s *server) serveTCP(ln net.Listener) {
 func (s *server) handleESP(conn net.Conn) {
 	addr := conn.RemoteAddr().String()
 	log.Printf("ESP connected: %s", addr)
-	s.setConnected(true)
+	s.connOpened()
 	defer func() {
 		log.Printf("ESP disconnected: %s", addr)
-		s.setConnected(false)
+		s.connClosed()
 		conn.Close()
 	}()
 
@@ -232,9 +233,18 @@ func (s *server) applyTransition(e rawEvent) {
 	s.pushSnapshot()
 }
 
-func (s *server) setConnected(v bool) {
+func (s *server) connOpened() {
 	s.mu.Lock()
-	s.connected = v
+	s.conns++
+	s.mu.Unlock()
+	s.pushSnapshot()
+}
+
+func (s *server) connClosed() {
+	s.mu.Lock()
+	if s.conns > 0 {
+		s.conns--
+	}
 	s.mu.Unlock()
 	s.pushSnapshot()
 }
@@ -250,7 +260,7 @@ func (s *server) snap() snapshot {
 	hist := make([]transition, len(s.history))
 	copy(hist, s.history)
 	return snapshot{
-		Connected: s.connected, Dev: s.dev, IP: s.ip,
+		Connected: s.conns > 0, Dev: s.dev, IP: s.ip,
 		Current: s.current, CurConf: s.curConf,
 		SinceMs: s.since.UnixMilli(), NowMs: time.Now().UnixMilli(),
 		Dropped: s.dropped, Stats: statsCopy, History: hist,
