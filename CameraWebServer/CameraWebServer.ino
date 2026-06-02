@@ -1,8 +1,15 @@
 #include <Arduino.h>
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WiFiManager.h>
 #include <Preferences.h>
+
+// mDNS hostname: makes the camera reachable at http://<MDNS_HOSTNAME>.local/
+// regardless of the DHCP-assigned IP.
+#ifndef MDNS_HOSTNAME
+#define MDNS_HOSTNAME "scanner"
+#endif
 
 // ===========================
 // Select camera model in board_config.h
@@ -139,7 +146,15 @@ void setup() {
   Serial.print("WiFi connected: ");
   Serial.println(WiFi.localIP());
 
+  // Advertise a stable .local name so the IP doesn't have to be hunted down.
+  if (MDNS.begin(MDNS_HOSTNAME)) {
+    Serial.printf("mDNS started: http://%s.local/\n", MDNS_HOSTNAME);
+  } else {
+    Serial.println("mDNS start failed");
+  }
+
   startCameraServer();
+  MDNS.addService("http", "tcp", 80);
 
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());

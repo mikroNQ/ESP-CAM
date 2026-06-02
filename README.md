@@ -107,6 +107,12 @@ Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH34
 6. В Serial Monitor (115200) появится строка вида `Camera Ready! Use 'http://x.x.x.x' to connect`.
 7. Открой этот IP в браузере — увидишь интерфейс с потоком и настройками камеры.
 
+> **mDNS**: чтобы не искать плавающий DHCP-адрес, ESP анонсирует себя по mDNS как
+> **`http://scanner.local/`** (имя задаётся `MDNS_HOSTNAME` в `CameraWebServer.ino`).
+> Работает на Windows/macOS/iOS из коробки; на части Android — нет. Если `.local` не
+> резолвится, IP всё равно есть в Serial и в `/status`. Так же доступны эндпоинты
+> вида `http://scanner.local/capture?roi=1`.
+
 ## Особенности диагностики (на что напоролись)
 
 - **Stock AT-прошивка** Espressif AT v1.1.2, которая может быть на модуле «из коробки», использует **UART1** для AT-команд (`RX=GPIO16`, `TX=GPIO17`), а **UART0** только для системного лога. На AI-Thinker ESP-CAM GPIO17 не выведен на гребёнки (занят PSRAM-линией), поэтому двусторонняя AT-связь через стандартное подключение к U0R/U0T невозможна. Это объясняет, почему по дефолту бутлог читается, а ответ на `AT` не приходит. Лечится перепрошивкой на родной CameraWebServer (этот репо) или на ESP-AT v2.x, где UART для AT перенастраиваемый. Полный разбор с экспериментальным подтверждением через `AT+RST → SW_CPU_RESET` — в [docs/at-firmware-uart-routing.md](docs/at-firmware-uart-routing.md).
