@@ -56,8 +56,10 @@ volatile uint32_t g_dropped = 0;  // events lost to queue overflow
 }  // namespace
 
 uint32_t ledDetectorTakeDropped(void) {
+  portENTER_CRITICAL(&g_cfg_mux);
   uint32_t n = g_dropped;
   g_dropped = 0;
+  portEXIT_CRITICAL(&g_cfg_mux);
   return n;
 }
 
@@ -146,7 +148,9 @@ static void preprocess_into_input(const camera_fb_t *fb, const led_roi_t &roi) {
 
   const int outW = LED_MODEL_INPUT_W;
   const int outH = LED_MODEL_INPUT_H;
-  const float in_scale = LED_MODEL_INPUT_SCALE;
+  // Folded normalise-to-[0,1] (must match ml/train.py) + quantize-to-int8
+  // factor: q = round((v/255) / in_scale) + zp == round(v * quant_k) + zp.
+  const float quant_k = 1.0f / (255.0f * LED_MODEL_INPUT_SCALE);
   const int in_zp = LED_MODEL_INPUT_ZERO_POINT;
   int8_t *in = g_input->data.int8;
 
@@ -174,15 +178,11 @@ static void preprocess_into_input(const camera_fb_t *fb, const led_roi_t &roi) {
         }
       }
       if (n == 0) n = 1;
-      uint8_t r8 = accR / n;
-      uint8_t g8 = accG / n;
-      uint8_t b8 = accB / n;
+      uint32_t rgb[3] = {accR / n, accG / n, accB / n};
 
-      // Normalise to [0,1] (must match ml/train.py) then quantize to int8.
       int idx = (oy * outW + ox) * LED_MODEL_INPUT_CH;
-      float rgb[3] = {r8 / 255.0f, g8 / 255.0f, b8 / 255.0f};
       for (int c = 0; c < LED_MODEL_INPUT_CH; c++) {
-        int q = (int)lroundf(rgb[c] / in_scale) + in_zp;
+        int q = (int)lroundf(rgb[c] * quant_k) + in_zp;
         if (q < -128) q = -128;
         if (q > 127) q = 127;
         in[idx + c] = (int8_t)q;
@@ -191,9 +191,10 @@ static void preprocess_into_input(const camera_fb_t *fb, const led_roi_t &roi) {
   }
 }
 
-// Run one inference; writes argmax class and confidence to out params.
-static bool classify(const camera_fb_t *fb, const led_roi_t &roi, led_state_t *cls, float *conf) {
-  preprocess_into_input(fb, roi);
+// Run one inference over the already-filled input tensor; writes argmax class
+// and confidence to out params. The framebuffer must be returned before this
+// is called so a camera buffer is never tied up for the duration of Invoke().
+static bool run_inference(led_state_t *cls, float *conf) {
   if (g_interpreter->Invoke() != kTfLiteOk) {
     return false;
   }
@@ -248,7 +249,9 @@ static void update_state_machine(led_state_t raw, float conf, uint32_t now) {
         led_event_t discard;
         xQueueReceive(g_event_queue, &discard, 0);
         xQueueSend(g_event_queue, &ev, 0);
+        portENTER_CRITICAL(&g_cfg_mux);
         g_dropped++;
+        portEXIT_CRITICAL(&g_cfg_mux);
       }
     }
   }
@@ -280,12 +283,12 @@ static void detector_task(void *arg) {
     }
 
     led_roi_t roi = ledDetectorGetRoi();
-    led_state_t cls;
-    float conf;
-    bool ok = classify(fb, roi, &cls, &conf);
+    preprocess_into_input(fb, roi);
     esp_camera_fb_return(fb);  // return promptly; never held across Invoke()
 
-    if (ok) {
+    led_state_t cls;
+    float conf;
+    if (run_inference(&cls, &conf)) {
       update_state_machine(cls, conf, millis());
     }
   }

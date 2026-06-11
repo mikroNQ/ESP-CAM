@@ -19,6 +19,7 @@ from PIL import Image
 
 from model import CLASS_NAMES
 from autolabel import classify_roi
+from dataset_util import next_index
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "data")
@@ -37,11 +38,6 @@ def list_items():
             if f.endswith(".png"):
                 items.append([os.path.join(d, f), folder])
     return items
-
-
-def next_index(out_dir):
-    os.makedirs(out_dir, exist_ok=True)
-    return len([f for f in os.listdir(out_dir) if f.endswith(".png")])
 
 
 def main():

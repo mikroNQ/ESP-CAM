@@ -24,8 +24,16 @@ volatile bool g_connected = false;
 uint32_t g_dropped_since_send = 0;  // events lost to queue overflow / no link
 }  // namespace
 
-const char *tcpReporterHost(void) { return g_host; }
-uint16_t tcpReporterPort(void) { return g_port; }
+void tcpReporterGetEndpoint(char *host, size_t host_cap, uint16_t *port) {
+  portENTER_CRITICAL(&g_ep_mux);
+  if (host && host_cap) {
+    strncpy(host, g_host, host_cap - 1);
+    host[host_cap - 1] = '\0';
+  }
+  if (port) *port = g_port;
+  portEXIT_CRITICAL(&g_ep_mux);
+}
+
 bool tcpReporterConnected(void) { return g_connected; }
 
 void tcpReporterInit(const char *host, uint16_t port) {

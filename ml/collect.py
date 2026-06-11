@@ -29,6 +29,7 @@ from PIL import Image
 
 from model import CLASS_NAMES
 from autolabel import classify_roi, DEFAULT_OFF_V, DEFAULT_RED_MARGIN, DEFAULT_WHITE_MIN
+from dataset_util import next_index
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -41,11 +42,6 @@ def fetch_bmp(host):
     r = requests.get(f"http://{host}/bmp", timeout=5)
     r.raise_for_status()
     return Image.open(io.BytesIO(r.content)).convert("RGB")
-
-
-def next_index(out_dir):
-    os.makedirs(out_dir, exist_ok=True)
-    return len([f for f in os.listdir(out_dir) if f.endswith(".png")])
 
 
 def main():

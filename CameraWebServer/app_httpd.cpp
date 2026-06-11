@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "Arduino.h"
+#include <stdarg.h>
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -272,7 +273,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   esp_err_t res = ESP_OK;
   size_t _jpg_buf_len = 0;
   uint8_t *_jpg_buf = NULL;
-  char *part_buf[128];
+  char part_buf[128];
 
   static int64_t last_frame = 0;
   if (!last_frame) {
@@ -317,8 +318,8 @@ static esp_err_t stream_handler(httpd_req_t *req) {
       res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
     }
     if (res == ESP_OK) {
-      size_t hlen = snprintf((char *)part_buf, 128, _STREAM_PART, _jpg_buf_len, _timestamp.tv_sec, _timestamp.tv_usec);
-      res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
+      size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, _jpg_buf_len, _timestamp.tv_sec, _timestamp.tv_usec);
+      res = httpd_resp_send_chunk(req, part_buf, hlen);
     }
     if (res == ESP_OK) {
       res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
@@ -471,12 +472,26 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
   return httpd_resp_send(req, NULL, 0);
 }
 
-static int print_reg(char *p, char *end, sensor_t *s, uint16_t reg, uint32_t mask) {
-  return snprintf(p, end - p, "\"0x%04x\":%d,", reg, s->get_reg(s, reg, mask));
+// Append formatted text at *p, clamping the cursor at end-1. snprintf returns
+// the would-be length on truncation, so the naive `p += snprintf(...)` pattern
+// pushes the cursor past the buffer and the next `end - p` underflows.
+static void json_append(char **p, char *end, const char *fmt, ...) {
+  if (end - *p <= 1) return;
+  va_list args;
+  va_start(args, fmt);
+  int n = vsnprintf(*p, end - *p, fmt, args);
+  va_end(args);
+  if (n < 0) return;
+  if (n > end - *p - 1) n = end - *p - 1;
+  *p += n;
+}
+
+static void print_reg(char **p, char *end, sensor_t *s, uint16_t reg, uint32_t mask) {
+  json_append(p, end, "\"0x%04x\":%d,", reg, s->get_reg(s, reg, mask));
 }
 
 static esp_err_t status_handler(httpd_req_t *req) {
-  static char json_response[1536];
+  static char json_response[2048];
 
   sensor_t *s = esp_camera_sensor_get();
   char *p = json_response;
@@ -485,68 +500,71 @@ static esp_err_t status_handler(httpd_req_t *req) {
 
   if (s->id.PID == OV5640_PID || s->id.PID == OV3660_PID) {
     for (int reg = 0x3400; reg < 0x3406; reg += 2) {
-      p += print_reg(p, end, s, reg, 0xFFF);  //12 bit
+      print_reg(&p, end, s, reg, 0xFFF);  //12 bit
     }
-    p += print_reg(p, end, s, 0x3406, 0xFF);
+    print_reg(&p, end, s, 0x3406, 0xFF);
 
-    p += print_reg(p, end, s, 0x3500, 0xFFFF0);  //16 bit
-    p += print_reg(p, end, s, 0x3503, 0xFF);
-    p += print_reg(p, end, s, 0x350a, 0x3FF);   //10 bit
-    p += print_reg(p, end, s, 0x350c, 0xFFFF);  //16 bit
+    print_reg(&p, end, s, 0x3500, 0xFFFF0);  //16 bit
+    print_reg(&p, end, s, 0x3503, 0xFF);
+    print_reg(&p, end, s, 0x350a, 0x3FF);   //10 bit
+    print_reg(&p, end, s, 0x350c, 0xFFFF);  //16 bit
 
     for (int reg = 0x5480; reg <= 0x5490; reg++) {
-      p += print_reg(p, end, s, reg, 0xFF);
+      print_reg(&p, end, s, reg, 0xFF);
     }
 
     for (int reg = 0x5380; reg <= 0x538b; reg++) {
-      p += print_reg(p, end, s, reg, 0xFF);
+      print_reg(&p, end, s, reg, 0xFF);
     }
 
     for (int reg = 0x5580; reg < 0x558a; reg++) {
-      p += print_reg(p, end, s, reg, 0xFF);
+      print_reg(&p, end, s, reg, 0xFF);
     }
-    p += print_reg(p, end, s, 0x558a, 0x1FF);  //9 bit
+    print_reg(&p, end, s, 0x558a, 0x1FF);  //9 bit
   } else if (s->id.PID == OV2640_PID) {
-    p += print_reg(p, end, s, 0xd3, 0xFF);
-    p += print_reg(p, end, s, 0x111, 0xFF);
-    p += print_reg(p, end, s, 0x132, 0xFF);
+    print_reg(&p, end, s, 0xd3, 0xFF);
+    print_reg(&p, end, s, 0x111, 0xFF);
+    print_reg(&p, end, s, 0x132, 0xFF);
   }
 
-  p += snprintf(p, end - p, "\"xclk\":%u,", s->xclk_freq_hz / 1000000);
-  p += snprintf(p, end - p, "\"pixformat\":%u,", s->pixformat);
-  p += snprintf(p, end - p, "\"framesize\":%u,", s->status.framesize);
-  p += snprintf(p, end - p, "\"quality\":%u,", s->status.quality);
-  p += snprintf(p, end - p, "\"brightness\":%d,", s->status.brightness);
-  p += snprintf(p, end - p, "\"contrast\":%d,", s->status.contrast);
-  p += snprintf(p, end - p, "\"saturation\":%d,", s->status.saturation);
-  p += snprintf(p, end - p, "\"sharpness\":%d,", s->status.sharpness);
-  p += snprintf(p, end - p, "\"special_effect\":%u,", s->status.special_effect);
-  p += snprintf(p, end - p, "\"wb_mode\":%u,", s->status.wb_mode);
-  p += snprintf(p, end - p, "\"awb\":%u,", s->status.awb);
-  p += snprintf(p, end - p, "\"awb_gain\":%u,", s->status.awb_gain);
-  p += snprintf(p, end - p, "\"aec\":%u,", s->status.aec);
-  p += snprintf(p, end - p, "\"aec2\":%u,", s->status.aec2);
-  p += snprintf(p, end - p, "\"ae_level\":%d,", s->status.ae_level);
-  p += snprintf(p, end - p, "\"aec_value\":%u,", s->status.aec_value);
-  p += snprintf(p, end - p, "\"agc\":%u,", s->status.agc);
-  p += snprintf(p, end - p, "\"agc_gain\":%u,", s->status.agc_gain);
-  p += snprintf(p, end - p, "\"gainceiling\":%u,", s->status.gainceiling);
-  p += snprintf(p, end - p, "\"bpc\":%u,", s->status.bpc);
-  p += snprintf(p, end - p, "\"wpc\":%u,", s->status.wpc);
-  p += snprintf(p, end - p, "\"raw_gma\":%u,", s->status.raw_gma);
-  p += snprintf(p, end - p, "\"lenc\":%u,", s->status.lenc);
-  p += snprintf(p, end - p, "\"hmirror\":%u,", s->status.hmirror);
-  p += snprintf(p, end - p, "\"vflip\":%u,", s->status.vflip);
-  p += snprintf(p, end - p, "\"dcw\":%u,", s->status.dcw);
-  p += snprintf(p, end - p, "\"colorbar\":%u", s->status.colorbar);
+  json_append(&p, end, "\"xclk\":%u,", s->xclk_freq_hz / 1000000);
+  json_append(&p, end, "\"pixformat\":%u,", s->pixformat);
+  json_append(&p, end, "\"framesize\":%u,", s->status.framesize);
+  json_append(&p, end, "\"quality\":%u,", s->status.quality);
+  json_append(&p, end, "\"brightness\":%d,", s->status.brightness);
+  json_append(&p, end, "\"contrast\":%d,", s->status.contrast);
+  json_append(&p, end, "\"saturation\":%d,", s->status.saturation);
+  json_append(&p, end, "\"sharpness\":%d,", s->status.sharpness);
+  json_append(&p, end, "\"special_effect\":%u,", s->status.special_effect);
+  json_append(&p, end, "\"wb_mode\":%u,", s->status.wb_mode);
+  json_append(&p, end, "\"awb\":%u,", s->status.awb);
+  json_append(&p, end, "\"awb_gain\":%u,", s->status.awb_gain);
+  json_append(&p, end, "\"aec\":%u,", s->status.aec);
+  json_append(&p, end, "\"aec2\":%u,", s->status.aec2);
+  json_append(&p, end, "\"ae_level\":%d,", s->status.ae_level);
+  json_append(&p, end, "\"aec_value\":%u,", s->status.aec_value);
+  json_append(&p, end, "\"agc\":%u,", s->status.agc);
+  json_append(&p, end, "\"agc_gain\":%u,", s->status.agc_gain);
+  json_append(&p, end, "\"gainceiling\":%u,", s->status.gainceiling);
+  json_append(&p, end, "\"bpc\":%u,", s->status.bpc);
+  json_append(&p, end, "\"wpc\":%u,", s->status.wpc);
+  json_append(&p, end, "\"raw_gma\":%u,", s->status.raw_gma);
+  json_append(&p, end, "\"lenc\":%u,", s->status.lenc);
+  json_append(&p, end, "\"hmirror\":%u,", s->status.hmirror);
+  json_append(&p, end, "\"vflip\":%u,", s->status.vflip);
+  json_append(&p, end, "\"dcw\":%u,", s->status.dcw);
+  json_append(&p, end, "\"colorbar\":%u", s->status.colorbar);
 #if defined(LED_GPIO_NUM)
-  p += snprintf(p, end - p, ",\"led_intensity\":%u", led_duty);
+  json_append(&p, end, ",\"led_intensity\":%u", led_duty);
 #else
-  p += snprintf(p, end - p, ",\"led_intensity\":%d", -1);
+  json_append(&p, end, ",\"led_intensity\":%d", -1);
 #endif
   // LED detector + TCP reporter status.
   led_roi_t droi = ledDetectorGetRoi();
-  p += snprintf(p, end - p,
+  char tcp_host[64];
+  uint16_t tcp_port;
+  tcpReporterGetEndpoint(tcp_host, sizeof(tcp_host), &tcp_port);
+  json_append(&p, end,
                 ",\"det_enabled\":%d,\"det_state\":\"%s\",\"det_conf\":%.2f,"
                 "\"det_roi\":[%u,%u,%u,%u],\"det_fixexp\":%d,\"det_aec_value\":%d,"
                 "\"det_agc_gain\":%d,\"tcp_host\":\"%s\",\"tcp_port\":%u,"
@@ -554,20 +572,20 @@ static esp_err_t status_handler(httpd_req_t *req) {
                 ledDetectorIsEnabled() ? 1 : 0, led_state_name(ledDetectorCurrentState()),
                 ledDetectorCurrentConfidence(), droi.x, droi.y, droi.w, droi.h,
                 ledDetectorFixedExpEnabled() ? 1 : 0, ledDetectorAecValue(), ledDetectorAgcGain(),
-                tcpReporterHost(), tcpReporterPort(), tcpReporterConnected() ? 1 : 0);
+                tcp_host, tcp_port, tcpReporterConnected() ? 1 : 0);
   // Health diagnostics: distinguish "stalled" (uptime keeps growing) from
   // "rebooted" (uptime resets; reset_reason shows brownout/panic) and watch the
   // WiFi signal + heap. reset_reason: 1=POWERON 3=SW 4=PANIC 5=INT_WDT 6=TASK_WDT
   // 7=WDT 8=DEEPSLEEP 9=BROWNOUT.
-  p += snprintf(p, end - p,
+  json_append(&p, end,
                 ",\"uptime_s\":%lu,\"free_heap\":%u,\"min_free_heap\":%u,"
                 "\"rssi\":%d,\"reset_reason\":%d",
                 (unsigned long)(esp_timer_get_time() / 1000000ULL),
                 (unsigned)esp_get_free_heap_size(),
                 (unsigned)esp_get_minimum_free_heap_size(),
                 (int)WiFi.RSSI(), (int)esp_reset_reason());
-  *p++ = '}';
-  *p++ = 0;
+  if (p < end - 1) *p++ = '}';
+  *p = 0;
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   return httpd_resp_send(req, json_response, strlen(json_response));
@@ -590,15 +608,22 @@ static esp_err_t detcfg_handler(httpd_req_t *req) {
     led_roi_t roi = ledDetectorGetRoi();
     bool roi_changed = false;
 
+    char ep_host[64];
+    uint16_t ep_port;
+    tcpReporterGetEndpoint(ep_host, sizeof(ep_host), &ep_port);
+    bool ep_changed = false;
     if (httpd_query_key_value(buf, "host", v, sizeof(v)) == ESP_OK) {
-      tcpReporterSetEndpoint(v, tcpReporterPort());
-      prefs.putString(DET_NVS_HOST, v);
+      strncpy(ep_host, v, sizeof(ep_host) - 1);
+      ep_host[sizeof(ep_host) - 1] = '\0';
+      prefs.putString(DET_NVS_HOST, ep_host);
+      ep_changed = true;
     }
     if (httpd_query_key_value(buf, "port", v, sizeof(v)) == ESP_OK) {
-      uint16_t port = (uint16_t)atoi(v);
-      tcpReporterSetEndpoint(tcpReporterHost(), port);
-      prefs.putUShort(DET_NVS_PORT, port);
+      ep_port = (uint16_t)atoi(v);
+      prefs.putUShort(DET_NVS_PORT, ep_port);
+      ep_changed = true;
     }
+    if (ep_changed) tcpReporterSetEndpoint(ep_host, ep_port);
     if (httpd_query_key_value(buf, "roi_x", v, sizeof(v)) == ESP_OK) {
       roi.x = (uint16_t)atoi(v); prefs.putUShort(DET_NVS_ROI_X, roi.x); roi_changed = true;
     }
@@ -639,13 +664,16 @@ static esp_err_t detcfg_handler(httpd_req_t *req) {
   }
 
   led_roi_t roi = ledDetectorGetRoi();
+  char cur_host[64];
+  uint16_t cur_port;
+  tcpReporterGetEndpoint(cur_host, sizeof(cur_host), &cur_port);
   char json[320];
   int n = snprintf(json, sizeof(json),
                    "{\"enabled\":%d,\"host\":\"%s\",\"port\":%u,"
                    "\"roi\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},"
                    "\"fixexp\":%d,\"aec_value\":%d,\"agc_gain\":%d,"
                    "\"state\":\"%s\",\"conf\":%.2f,\"tcp_connected\":%d}",
-                   ledDetectorIsEnabled() ? 1 : 0, tcpReporterHost(), tcpReporterPort(),
+                   ledDetectorIsEnabled() ? 1 : 0, cur_host, cur_port,
                    roi.x, roi.y, roi.w, roi.h,
                    ledDetectorFixedExpEnabled() ? 1 : 0, ledDetectorAecValue(), ledDetectorAgcGain(),
                    led_state_name(ledDetectorCurrentState()), ledDetectorCurrentConfidence(),
