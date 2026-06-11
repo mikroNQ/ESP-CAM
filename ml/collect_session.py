@@ -28,6 +28,8 @@ import numpy as np
 import requests
 from PIL import Image
 
+from dataset_util import next_index
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -77,8 +79,7 @@ def main():
         apply_exposure_lock(args.host, args.lock_aec)
     x, y, w, h = tuple(args.roi) if args.roi else get_roi(args.host)
     out_dir = os.path.join(HERE, "data", args.label)
-    os.makedirs(out_dir, exist_ok=True)
-    idx = len([f for f in os.listdir(out_dir) if f.endswith(".png")])
+    idx = next_index(out_dir)
     print(f"Collecting up to {args.count} '{args.label}' crops from {args.host} "
           f"ROI=({x},{y},{w},{h}) gate[min={args.min_v} max={args.max_v}]")
 

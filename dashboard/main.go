@@ -27,6 +27,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"log"
 	"net"
@@ -167,8 +168,14 @@ func (s *server) serveTCP(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("tcp accept: %v", err)
-			return
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			// Временная ошибка (например, кончились дескрипторы) не должна
+			// навсегда останавливать приём событий от ESP.
+			log.Printf("tcp accept: %v — retry in 1s", err)
+			time.Sleep(time.Second)
+			continue
 		}
 		go s.handleESP(conn)
 	}

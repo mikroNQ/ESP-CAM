@@ -36,6 +36,12 @@ import (
 // от ESP32-CAM не связан — там парсится свой, взятый из заголовка ответа камеры.
 const outBoundary = "frame"
 
+// stallTimeout — сторожевой интервал чтения исходного потока. Если камера
+// умирает без TCP FIN (brownout, обрыв питания), сокет остаётся полуоткрытым
+// и чтение блокируется навсегда; по истечении этого срока без единого кадра
+// соединение принудительно закрывается и puller переподключается.
+const stallTimeout = 10 * time.Second
+
 // Hub хранит подписчиков и последний полученный кадр.
 //
 // Все операции потокобезопасны. На каждого клиента заводится буферизованный
@@ -144,6 +150,15 @@ func pullOnce(client *http.Client, srcURL string, hub *Hub) error {
 
 	log.Printf("connected to source: %s (boundary=%s)", srcURL, params["boundary"])
 
+	// Сторожевой таймер: закрывает тело ответа, если кадры перестали приходить.
+	// Закрытие выводит заблокированное чтение из NextPart/ReadAll с ошибкой,
+	// дальше обычный реконнект в puller.
+	watchdog := time.AfterFunc(stallTimeout, func() {
+		log.Printf("source stalled: no frame for %v — closing connection", stallTimeout)
+		resp.Body.Close()
+	})
+	defer watchdog.Stop()
+
 	mr := multipart.NewReader(resp.Body, params["boundary"])
 	for {
 		part, err := mr.NextPart()
@@ -155,6 +170,7 @@ func pullOnce(client *http.Client, srcURL string, hub *Hub) error {
 		if err != nil {
 			return fmt.Errorf("read part: %w", err)
 		}
+		watchdog.Reset(stallTimeout)
 		if len(buf) == 0 {
 			continue
 		}

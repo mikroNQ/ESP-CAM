@@ -7,6 +7,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,9 +23,9 @@ void tcpReporterStart(void);
 // Update the endpoint at runtime (from /detcfg); forces a reconnect.
 void tcpReporterSetEndpoint(const char *host, uint16_t port);
 
-// Accessors for /status.
-const char *tcpReporterHost(void);
-uint16_t tcpReporterPort(void);
+// Accessors for /status and /detcfg. The endpoint is copied out under the
+// config lock so callers never observe a half-updated host string.
+void tcpReporterGetEndpoint(char *host, size_t host_cap, uint16_t *port);
 bool tcpReporterConnected(void);
 
 #ifdef __cplusplus
