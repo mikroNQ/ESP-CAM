@@ -1,4 +1,24 @@
-tensorflow-cpu>=2.15
+# ML-пайплайн (ml/). Ставить в виртуальное окружение (venv).
+#
+# ВАЖНО ПРО ВЕРСИЮ PYTHON (macOS):
+#   TensorFlow пока НЕ публикует wheel'ы под Python 3.14 (это дефолтный
+#   Homebrew-python на этой машине), поэтому обучение требует Python 3.11–3.12:
+#       brew install python@3.12
+#       /opt/homebrew/bin/python3.12 -m venv .venv
+#       source .venv/bin/activate
+#       pip install -r requirements.txt
+#   venv обязателен ещё и из-за PEP 668 (Homebrew-python запрещает системный pip).
+#   На Apple Silicon ставится нативный arm64-tensorflow; tensorflow-metal для
+#   обучения этой крошечной модели не нужен.
+#
+# Что чем нужно:
+#   - collect_session.py (основной сборщик) — TF НЕ нужен, хватает numpy/Pillow/
+#     requests, работает и на дефолтном Python 3.14.
+#   - train.py / model.py / convert_to_header.py / make_bootstrap.py / collect.py /
+#     review.py — нужен TensorFlow (Python 3.11–3.12).
+#   - review.py — дополнительно нужен Tk:  brew install python-tk@3.12
+
+tensorflow>=2.16     # macOS/arm64: нативный пакет (вместо tensorflow-cpu — у того нет mac-arm wheel)
 numpy>=1.24
 Pillow>=10.0
 requests>=2.31

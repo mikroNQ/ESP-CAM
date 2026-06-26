@@ -17,9 +17,11 @@
 
 ```bash
 cd dashboard
-go build -o esp-dashboard.exe .
-./esp-dashboard.exe -esp=:9000 -http=:8080
+go build -o esp-dashboard .
+./esp-dashboard -esp=:9000 -http=:8080
 ```
+
+> Windows: бинарь будет `esp-dashboard.exe` (`go build -o esp-dashboard.exe .`).
 
 Флаги:
 - `-esp` — TCP-адрес приёма событий от ESP (по умолчанию `:9000`).

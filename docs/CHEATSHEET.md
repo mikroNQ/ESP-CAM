@@ -1,41 +1,50 @@
 # Шпаргалка команд
 
-Быстрый справочник по всем операциям проекта. Команды — для **PowerShell**
-(Windows), из корня репозитория, если не указано иное.
+Быстрый справочник по всем операциям проекта. Команды — для **macOS** (zsh/bash),
+из корня репозитория, если не указано иное. Windows-варианты (PowerShell) — в
+истории репозитория и в `scripts/*.ps1`.
 
 **Текущие значения этой установки** (подставь свои, если отличается):
 
 | Что | Значение |
 |---|---|
 | IP камеры `<cam-ip>` | `172.27.165.190` |
-| IP компьютера `<pc-ip>` | `172.27.165.172` |
-| COM-порт `<port>` | `COM3` |
+| IP компьютера `<pc-ip>` | `ipconfig getifaddr en0` |
+| Порт `<port>` | `/dev/cu.usbserial-110` (CH340 → `cu.wchusbserial*`) |
 | ROI | `18,37,124,12` |
 | Экспозиция | `aec_value=1300`, `agc_gain=0`, AWB off |
 
-> В PowerShell `curl` — это псевдоним `Invoke-WebRequest` (другой синтаксис). Для
-> URL ниже проще **открыть их в браузере**, либо вызывать реальный `curl.exe`.
+> На macOS `curl` — настоящий curl, URL ниже можно дёргать прямо в терминале
+> или открыть в браузере.
 
 ---
 
 ## 🔌 Прошивка (arduino-cli)
 
-```powershell
+```bash
 # 1) перемычка IO0<->GND, передёрнуть питание 5В, потом:
-$env:ARDUINO_DIRECTORIES_DATA='C:\Users\ChueshovV\AppData\Local\Arduino15'
-.\tools\arduino-cli.exe compile --fqbn esp32:esp32:esp32cam CameraWebServer
-.\tools\arduino-cli.exe upload  --fqbn esp32:esp32:esp32cam --port COM3 CameraWebServer
+arduino-cli compile --fqbn esp32:esp32:esp32cam CameraWebServer
+arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-110 CameraWebServer
 # 2) снять перемычку IO0<->GND, передёрнуть питание
 ```
 
-Найти COM-порт:
-```powershell
-Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH340|CP210|FTDI'
+Или весь процесс интерактивно: `./scripts/setup-esp-cam.sh`
+
+> Не шьётся (`No serial data received`, виснет на `Connecting...`)? → [`docs/macos-flashing-troubleshooting.md`](macos-flashing-troubleshooting.md).
+> Первым делом освободи порт: `pkill -9 -f "arduino-cli upload"; pkill -9 -f esptool`.
+
+Найти порт:
+```bash
+ls /dev/cu.*            # CH340 → cu.wchusbserial*, CP2102 → cu.SLAB_USBtoUART
+arduino-cli board list
 ```
+
+> Данные arduino-cli на macOS по умолчанию в `~/Library/Arduino15` —
+> переменную окружения задавать не нужно.
 
 ---
 
-## 📷 Настройка камеры (открыть в браузере или `curl.exe`)
+## 📷 Настройка камеры (curl или открыть в браузере)
 
 ```text
 http://<cam-ip>/status                                   # полный статус (камера + детектор)
@@ -49,29 +58,38 @@ http://<cam-ip>/detcfg?enable=1                                 # детекто
 http://<cam-ip>/detcfg?host=<pc-ip>&port=9000                  # куда слать события
 ```
 
+Найти камеру в сети (без mDNS): `./scripts/find-esp.sh`
+
 ---
 
 ## 🎞️ Сбор датасета (Python, из корня)
 
-```powershell
-# один раз: pip install -r ml\requirements.txt
+```bash
+# один раз: venv (TF для сбора НЕ нужен)
+python3 -m venv ml/.venv && source ml/.venv/bin/activate
+pip install numpy Pillow requests
 # держи нужное состояние сканера во время каждой команды:
-py ml\collect_session.py --host <cam-ip> --label red_on   --min-v 75 --lock-aec 1300 --count 300
-py ml\collect_session.py --host <cam-ip> --label white_on --min-v 85 --lock-aec 1300 --count 300
-py ml\collect_session.py --host <cam-ip> --label off      --max-v 78 --lock-aec 1300 --count 300
+python ml/collect_session.py --host <cam-ip> --label red_on   --min-v 75 --lock-aec 1300 --count 300
+python ml/collect_session.py --host <cam-ip> --label white_on --min-v 85 --lock-aec 1300 --count 300
+python ml/collect_session.py --host <cam-ip> --label off      --max-v 78 --lock-aec 1300 --count 300
 ```
 
 Сколько собрано по классам:
-```powershell
-Get-ChildItem ml\data -Directory | ForEach-Object { "$($_.Name): $((Get-ChildItem $_.FullName -Filter *.png).Count)" }
+```bash
+for d in ml/data/*/; do echo "$(basename "$d"): $(ls "$d"*.png 2>/dev/null | wc -l | tr -d ' ')"; done
 ```
 
 ---
 
 ## 🧠 Обучение модели
 
-```powershell
-py ml\train.py --epochs 40        # перезапишет CameraWebServer\led_model.h
+TensorFlow требует Python 3.11–3.12 (под 3.14 wheel'ов нет) — отдельный venv:
+
+```bash
+brew install python@3.12
+/opt/homebrew/bin/python3.12 -m venv ml/.venv-train && source ml/.venv-train/bin/activate
+pip install -r ml/requirements.txt
+python ml/train.py --epochs 40        # перезапишет CameraWebServer/led_model.h
 # затем заново прошить (раздел «Прошивка»)
 ```
 
@@ -79,55 +97,54 @@ py ml\train.py --epochs 40        # перезапишет CameraWebServer\led_m
 
 ## 🖥️ Веб-дашборд (Go)
 
-```powershell
+```bash
 cd dashboard
-go build -o esp-dashboard.exe .
+go build -o esp-dashboard .
 cd ..
-.\dashboard\esp-dashboard.exe -esp=:9000 -http=:8080      # чёрное окно не закрывать
+./dashboard/esp-dashboard -esp=:9000 -http=:8080      # терминал не закрывать (Ctrl+C — стоп)
 # открыть в браузере:  http://localhost:8080   (или http://<pc-ip>:8080)
-# узнать IP этого ПК:
-(Get-NetIPAddress -AddressFamily IPv4 | Where-Object IPAddress -notlike '169.*').IPAddress
+# узнать IP этого компа:
+ipconfig getifaddr en0
 ```
 
 Остановить дашборд:
-```powershell
-Stop-Process -Name esp-dashboard -Force
+```bash
+pkill -f esp-dashboard     # или Ctrl+C в его терминале
 ```
 
 ---
 
 ## 🔍 Диагностика
 
-```powershell
+```bash
 # средняя яркость/цвет ROI прямо сейчас (помогает подобрать экспозицию/гейты):
-py -c "import requests,io,numpy as np; from PIL import Image; h='<cam-ip>'; r=requests.get(f'http://{h}/detcfg',timeout=6).json()['roi']; im=Image.open(io.BytesIO(requests.get(f'http://{h}/capture',timeout=10).content)).convert('RGB'); c=im.crop((r['x'],r['y'],r['x']+r['w'],r['y']+r['h'])); a=np.asarray(c,dtype=np.float32); print('R=%.0f G=%.0f B=%.0f V=%.0f'%(a[...,0].mean(),a[...,1].mean(),a[...,2].mean(),a.mean()))"
+python3 -c "import requests,io,numpy as np; from PIL import Image; h='<cam-ip>'; r=requests.get(f'http://{h}/detcfg',timeout=6).json()['roi']; im=Image.open(io.BytesIO(requests.get(f'http://{h}/capture',timeout=10).content)).convert('RGB'); c=im.crop((r['x'],r['y'],r['x']+r['w'],r['y']+r['h'])); a=np.asarray(c,dtype=np.float32); print('R=%.0f G=%.0f B=%.0f V=%.0f'%(a[...,0].mean(),a[...,1].mean(),a[...,2].mean(),a.mean()))"
 
 # снимок состояния дашборда (JSON):
-(Invoke-WebRequest 'http://localhost:8080/api/state' -UseBasicParsing).Content
+curl -s http://localhost:8080/api/state
 
 # здоровье ESP (ребут vs стопор, сигнал, память):
-py -c "import requests; s=requests.get('http://<cam-ip>/status',timeout=8).json(); print('reset_reason=%s uptime_s=%s rssi=%s free_heap=%s'%(s['reset_reason'],s['uptime_s'],s['rssi'],s['free_heap']))"
+python3 -c "import requests; s=requests.get('http://<cam-ip>/status',timeout=8).json(); print('reset_reason=%s uptime_s=%s rssi=%s free_heap=%s'%(s['reset_reason'],s['uptime_s'],s['rssi'],s['free_heap']))"
 # reset_reason: 1=POWERON 9=BROWNOUT(слабое питание!) 6/7=WDT 4=PANIC.
 # uptime_s сбрасывается при «зависании» => был ребут (питание). rssi хуже -75 => слабый WiFi.
 ```
 
-Поймать IP камеры с порта (если забыл) — открой Serial Monitor на `<port>` @115200
+> `python3` выше — в активированном venv с numpy/Pillow/requests (раздел «Сбор датасета»).
+
+Поймать IP камеры из Serial (если забыл) — `arduino-cli monitor -p /dev/cu.usbserial-110 -c baudrate=115200`
 и передёрни питание; будет строка `Camera Ready! Use 'http://x.x.x.x'`.
 
 ---
 
-## 🌿 Git (особенность окружения)
+## 🌿 Git
 
-В этом окружении штатный `git push` ломается (GCM + msys). Рабочая команда —
-сбросить список хелперов и оставить `wincred`:
+Bash-инструмент и `git` на этом Mac работают штатно:
 
-```powershell
+```bash
 git add <файлы>
 git commit -m "сообщение"
-git -c credential.helper= -c credential.helper=wincred push origin main
+git push origin main
 ```
-
-> Bash-инструмент тут крашится — все git/shell-команды через PowerShell.
 
 ---
 
