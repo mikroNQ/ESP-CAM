@@ -30,6 +30,9 @@ arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-110 Cam
 
 Или весь процесс интерактивно: `./scripts/setup-esp-cam.sh`
 
+> Не шьётся (`No serial data received`, виснет на `Connecting...`)? → [`docs/macos-flashing-troubleshooting.md`](macos-flashing-troubleshooting.md).
+> Первым делом освободи порт: `pkill -9 -f "arduino-cli upload"; pkill -9 -f esptool`.
+
 Найти порт:
 ```bash
 ls /dev/cu.*            # CH340 → cu.wchusbserial*, CP2102 → cu.SLAB_USBtoUART

@@ -91,6 +91,11 @@ arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-110 Cam
 > ~24–32 КБ обычно достаточно; реально использованный размер арены прошивка
 > печатает в Serial: `[det] model ready, arena used N / M bytes`).
 
+> **Не шьётся на macOS?** Голый модуль без авто-сброса, ошибки `No serial data
+> received` / `could not open port`, заливка падает на `Connecting...` — разбор
+> реальных грабель (зависший esptool держит порт, вход в download-режим, тест
+> передачи) в [`macos-flashing-troubleshooting.md`](macos-flashing-troubleshooting.md).
+
 ---
 
 ## 3. Первый запуск и подключение к WiFi
