@@ -47,37 +47,44 @@
 
 ## Быстрый старт — интерактивный скрипт
 
-Если просто хочешь повторить всё с нуля на новом модуле:
+Если просто хочешь повторить всё с нуля на новом модуле.
 
-```powershell
+**macOS / Linux** (`arduino-cli` ставится один раз через Homebrew):
+
+```bash
+brew install arduino-cli          # один раз; скрипт ниже проверит наличие
 git clone git@github.com:mikroNQ/ESP-CAM.git
 cd ESP-CAM
-.\scripts\setup-esp-cam.ps1
+./scripts/setup-esp-cam.sh
 ```
+
+> **Windows** (PowerShell): `.\scripts\setup-esp-cam.ps1` — см. раздел ниже.
 
 Скрипт:
 
-1. Скачает `arduino-cli` в `tools/` (если нет в PATH)
-2. Поставит `esp32:esp32@3.3.8` core и `WiFiManager@2.0.17` (если ещё не стоят)
-3. Найдёт USB-TTL переходник в системе и спросит какой использовать
-4. (Опц.) Прогонит loopback на трёх baud
-5. Покажет схему подключения и подождёт подтверждения
-6. Откроет serial monitor — проверит, что модуль жив, опознает stock AT firmware
-7. Попросит поставить `IO0↔GND`, скомпилирует и зальёт sketch
-8. Поймает IP-адрес из вывода WiFiManager после captive portal и предложит открыть в браузере
+1. Проверит `arduino-cli` (на macOS подскажет `brew install arduino-cli`, если нет)
+2. Поставит `esp32:esp32@3.3.8` core, `WiFiManager@2.0.17`, `Chirale_TensorFlowLite` (если не стоят)
+3. Найдёт USB-TTL переходник (`/dev/cu.*`) и спросит какой использовать
+4. Покажет схему подключения и подождёт подтверждения
+5. Послушает serial — проверит, что модуль жив, опознает stock AT firmware
+6. Попросит поставить `IO0↔GND`, скомпилирует и зальёт sketch
+7. Поймает IP-адрес из вывода WiFiManager после captive portal и предложит открыть в браузере
 
-Опциональные флаги:
+Опциональные флаги (macOS-скрипт):
 
-```powershell
-.\scripts\setup-esp-cam.ps1 -ComPort COM5      # явный порт
-.\scripts\setup-esp-cam.ps1 -SkipLoopback      # без проверки адаптера
-.\scripts\setup-esp-cam.ps1 -SkipBootCheck     # сразу к прошивке
-.\scripts\setup-esp-cam.ps1 -NoBrowser         # не открывать браузер
+```bash
+./scripts/setup-esp-cam.sh --port /dev/cu.usbserial-110   # явный порт
+./scripts/setup-esp-cam.sh --skip-bootcheck               # сразу к прошивке
+./scripts/setup-esp-cam.sh --no-browser                   # не открывать браузер
 ```
+
+> Драйвер USB-TTL: для CH340 на современных macOS обычно стоит из коробки
+> (`/dev/cu.wchusbserial*`); для CP2102 — `/dev/cu.SLAB_USBtoUART`. PL2303-клоны
+> на macOS Big Sur+ заблокированы (нужен оригинальный Prolific).
 
 ## Сборка и прошивка через arduino-cli вручную
 
-```powershell
+```bash
 # Однократно
 arduino-cli config init
 arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
@@ -86,16 +93,20 @@ arduino-cli core install esp32:esp32@3.3.8
 arduino-cli lib install "WiFiManager"
 arduino-cli lib install "Chirale_TensorFlowLite"
 
-# Каждый раз
+# Каждый раз (подставь свой порт /dev/cu.*)
 arduino-cli compile --fqbn esp32:esp32:esp32cam CameraWebServer
-arduino-cli upload  --fqbn esp32:esp32:esp32cam --port COM30 CameraWebServer
+arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-110 CameraWebServer
 ```
 
-Подставь свой COM-порт. На Windows номер можно посмотреть в Диспетчере устройств → Порты (COM и LPT), либо через PowerShell:
+Найти порт на macOS:
 
-```powershell
-Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH340|FTDI|CP210|Prolific'
+```bash
+ls /dev/cu.*                 # CH340 → cu.wchusbserial*, CP2102 → cu.SLAB_USBtoUART
+arduino-cli board list       # порты + опознанные платы
 ```
+
+> Windows: порт вида `COM30` (Диспетчер устройств → Порты, либо PowerShell
+> `Get-PnpDevice -Class Ports -PresentOnly`).
 
 ## Первый запуск
 
@@ -112,6 +123,9 @@ Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH34
 > Работает на Windows/macOS/iOS из коробки; на части Android — нет. Если `.local` не
 > резолвится, IP всё равно есть в Serial и в `/status`. Так же доступны эндпоинты
 > вида `http://scanner.local/capture?roi=1`.
+>
+> Если адрес неизвестен и mDNS не помог — найди камеру сканом подсети:
+> `./scripts/find-esp.sh` (macOS/Linux) или `.\scripts\find-esp.ps1` (Windows).
 
 ## Особенности диагностики (на что напоролись)
 
@@ -214,7 +228,10 @@ nc -lk 0.0.0.0 9000
 
 ```bash
 cd ml
-pip install -r requirements.txt
+# venv обязателен (PEP 668 на Homebrew-python). Сбор кадров TF не требует —
+# хватает дефолтного python3 + numpy/Pillow/requests:
+python3 -m venv .venv && source .venv/bin/activate
+pip install numpy Pillow requests
 # красный сканер горит:
 python collect_session.py --host <cam-ip> --label red_on   --min-v 75 --lock-aec 1300 --count 300
 # белый сканер горит:
@@ -228,7 +245,13 @@ python collect_session.py --host <cam-ip> --label off      --max-v 78 --lock-aec
 
 **2. Обучить и сгенерировать `led_model.h` (int8):**
 
+Обучение требует TensorFlow, а у него пока **нет wheel'ов под Python 3.14**
+(дефолтный Homebrew-python). Заведи отдельный venv на Python 3.11–3.12:
+
 ```bash
+brew install python@3.12
+/opt/homebrew/bin/python3.12 -m venv .venv-train && source .venv-train/bin/activate
+pip install -r requirements.txt
 python train.py --epochs 40
 ```
 
@@ -251,9 +274,9 @@ Go-сервис на stdlib принимает NDJSON-события от про
 
 ```bash
 cd dashboard
-go build -o esp-dashboard.exe .
-./esp-dashboard.exe -esp=:9000 -http=:8080
-# направить прошивку на этот ПК:
+go build -o esp-dashboard .          # Windows: -o esp-dashboard.exe
+./esp-dashboard -esp=:9000 -http=:8080
+# направить прошивку на этот ПК (узнать свой IP: ipconfig getifaddr en0):
 curl "http://<cam-ip>/detcfg?host=<pc-ip>&port=9000"
 # открыть http://<pc-ip>:8080
 ```

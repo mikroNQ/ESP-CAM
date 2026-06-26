@@ -7,15 +7,19 @@ tools/
 .DS_Store
 Thumbs.db
 
-# Go relay (см. relay/)
+# Go relay/dashboard — собранные бинари (см. relay/, dashboard/)
 *.exe
 *.exe~
 relay/esp-relay
 relay/esp-relay-*
+dashboard/esp-dashboard
+dashboard/esp-dashboard-*
 go.work
 go.work.sum
 
 # ML pipeline (см. ml/)
 ml/data/
 ml/__pycache__/
+ml/.venv/
+ml/.venv-train/
 *.tflite

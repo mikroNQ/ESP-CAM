@@ -36,15 +36,27 @@
 - Штатив/держатель, чтобы жёстко зафиксировать камеру напротив сканера.
 
 **Софт на ПК**
-- `arduino-cli` (или Arduino IDE) + ESP32 core `3.3.8`.
-- Python 3.9+ для обучения (`ml/`).
-- `netcat` (`nc`) и `curl` для проверки (на Windows — через WSL/Git Bash или аналоги).
+- `arduino-cli` (или Arduino IDE) + ESP32 core `3.3.8`. macOS: `brew install arduino-cli`.
+- Python для `ml/`: сбор кадров — на любом Python 3 (`collect_session.py`),
+  **обучение** (`train.py`) — на Python **3.11–3.12** (TensorFlow ещё без wheel'ов под 3.14).
+- `netcat` (`nc`) и `curl` — на macOS/Linux встроены; на Windows — через WSL/Git Bash.
 
 ---
 
 ## 2. Прошивка firmware
 
-### Вариант А — автоматический скрипт (Windows)
+### Вариант А — автоматический скрипт
+
+**macOS / Linux:**
+
+```bash
+brew install arduino-cli          # один раз
+git clone git@github.com:mikroNQ/ESP-CAM.git
+cd ESP-CAM
+./scripts/setup-esp-cam.sh
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 git clone git@github.com:mikroNQ/ESP-CAM.git
@@ -52,9 +64,10 @@ cd ESP-CAM
 .\scripts\setup-esp-cam.ps1
 ```
 
-Скрипт сам поставит `arduino-cli`, ESP32 core `3.3.8`, библиотеки
-`WiFiManager` и `Chirale_TensorFlowLite`, найдёт COM-порт, скомпилирует и зальёт
-прошивку. Следуй подсказкам (когда поставить `IO0↔GND`, передёрнуть питание).
+Скрипт сам поставит ESP32 core `3.3.8`, библиотеки `WiFiManager` и
+`Chirale_TensorFlowLite`, найдёт порт (`/dev/cu.*` на macOS, `COM*` на Windows),
+скомпилирует и зальёт прошивку. Следуй подсказкам (когда поставить `IO0↔GND`,
+передёрнуть питание).
 
 ### Вариант Б — вручную через arduino-cli
 
@@ -67,9 +80,9 @@ arduino-cli core install esp32:esp32@3.3.8
 arduino-cli lib install "WiFiManager"
 arduino-cli lib install "Chirale_TensorFlowLite"
 
-# Сборка и заливка (подставь свой порт)
+# Сборка и заливка (подставь свой порт: macOS — /dev/cu.*, Windows — COM*)
 arduino-cli compile --fqbn esp32:esp32:esp32cam CameraWebServer
-arduino-cli upload  --fqbn esp32:esp32:esp32cam --port COM30 CameraWebServer
+arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-110 CameraWebServer
 ```
 
 > **Контроль памяти.** У клона без PSRAM мало DRAM. В конце компиляции смотри на
@@ -183,8 +196,14 @@ nc -lk 0.0.0.0 9000
 
 ```bash
 cd ml
-pip install -r requirements.txt
+# venv обязателен (PEP 668 на Homebrew-python). Сбор кадров TF не требует:
+python3 -m venv .venv && source .venv/bin/activate
+pip install numpy Pillow requests          # для collect_session.py хватает этого
 ```
+
+> Для **обучения** (раздел 7) понадобится TensorFlow на Python 3.11–3.12 —
+> отдельный venv: `pip install -r requirements.txt`. Подробности — в шапке
+> [`ml/requirements.txt`](../ml/requirements.txt).
 
 ### 6.1 Снять кадры по сессиям (рекомендуется) — `collect_session.py`
 
@@ -245,7 +264,12 @@ python review.py
 
 ## 7. Обучение модели
 
+Нужен TensorFlow → отдельный venv на Python **3.11–3.12** (под 3.14 wheel'ов нет):
+
 ```bash
+brew install python@3.12
+/opt/homebrew/bin/python3.12 -m venv .venv-train && source .venv-train/bin/activate
+pip install -r requirements.txt
 python train.py --epochs 30
 ```
 
@@ -271,9 +295,9 @@ python train.py --epochs 30
 Модель встроена в `led_model.h`, поэтому просто пересобери и залей прошивку:
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32cam CameraWebServer
-arduino-cli upload  --fqbn esp32:esp32:esp32cam --port COM30 CameraWebServer
+arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-110 CameraWebServer
 ```
-(или прогони `scripts/setup-esp-cam.ps1` ещё раз).
+(или прогони `scripts/setup-esp-cam.sh` — macOS/Linux, либо `scripts\setup-esp-cam.ps1` — Windows — ещё раз).
 
 После загрузки повтори проверку из раздела 5 — теперь метки `red_on`/`white_on`/
 `off` и `conf` должны соответствовать реальности. Готово: распознавание и

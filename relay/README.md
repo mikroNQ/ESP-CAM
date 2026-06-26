@@ -20,22 +20,23 @@
 
 ## Сборка
 
-```powershell
+```bash
 cd relay
-go build -ldflags="-s -w" -trimpath -o esp-relay.exe .
+go build -ldflags="-s -w" -trimpath -o esp-relay .
 ```
+
+> Windows: добавь `.exe` к имени (`-o esp-relay.exe`).
 
 Кросс-сборка под Linux/ARM (например, для Raspberry Pi):
 
-```powershell
-$env:GOOS="linux"; $env:GOARCH="arm64"
-go build -ldflags="-s -w" -trimpath -o esp-relay-linux-arm64 .
+```bash
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -trimpath -o esp-relay-linux-arm64 .
 ```
 
 ## Запуск
 
-```powershell
-.\esp-relay.exe -src=http://<cam-ip>:81/stream -listen=:8032
+```bash
+./esp-relay -src=http://<cam-ip>:81/stream -listen=:8032
 ```
 
 | Флаг      | По умолчанию                       | Описание                                       |
@@ -53,28 +54,56 @@ go build -ldflags="-s -w" -trimpath -o esp-relay-linux-arm64 .
 
 CORS открыт (`Access-Control-Allow-Origin: *`), картинку можно встраивать с любой страницы в LAN.
 
-## Открыть фаервол Windows
+## Фаервол (macOS)
 
-```powershell
-New-NetFirewallRule -DisplayName "ESP relay 8032" -Direction Inbound `
-                    -Protocol TCP -LocalPort 8032 -Action Allow
+macOS по умолчанию не блокирует входящие подключения для CLI-бинарей. Если
+включён Application Firewall (Системные настройки → Сеть → Файрвол), при первом
+запуске появится диалог «Разрешить входящие подключения для esp-relay» — нажми
+**Разрешить**. Программно:
+
+```bash
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$(pwd)/esp-relay"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$(pwd)/esp-relay"
 ```
 
-## Автозапуск 24/7 — Task Scheduler
+> Windows: `New-NetFirewallRule -DisplayName "ESP relay 8032" -Direction Inbound -Protocol TCP -LocalPort 8032 -Action Allow`
 
-```powershell
-$action  = New-ScheduledTaskAction -Execute "C:\путь\esp-relay.exe" `
-                                   -Argument "-src=http://<cam-ip>:81/stream -listen=:8032"
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$princ   = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
-$set     = New-ScheduledTaskSettingsSet -RestartCount 999 `
-                                        -RestartInterval (New-TimeSpan -Minutes 1) `
-                                        -StartWhenAvailable
-Register-ScheduledTask -TaskName "ESP-CAM Relay" -Action $action `
-                       -Trigger $trigger -Principal $princ -Settings $set
+## Автозапуск 24/7 — launchd (macOS)
+
+Создай `~/Library/LaunchAgents/com.espcam.relay.plist` (подставь свои путь к
+бинарю и `<cam-ip>`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>            <string>com.espcam.relay</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ВАШ/ESP-CAM/relay/esp-relay</string>
+    <string>-src=http://<cam-ip>:81/stream</string>
+    <string>-listen=:8032</string>
+  </array>
+  <key>RunAtLoad</key>        <true/>
+  <key>KeepAlive</key>        <true/>   <!-- перезапуск при падении -->
+  <key>StandardErrorPath</key><string>/tmp/esp-relay.err.log</string>
+  <key>StandardOutPath</key>  <string>/tmp/esp-relay.out.log</string>
+</dict>
+</plist>
 ```
 
-Стартует под `SYSTEM` при загрузке Windows, перезапускается раз в минуту при падении.
+Загрузить / выгрузить:
+
+```bash
+launchctl load   ~/Library/LaunchAgents/com.espcam.relay.plist   # старт + автозапуск при логине
+launchctl unload ~/Library/LaunchAgents/com.espcam.relay.plist   # остановить и убрать
+```
+
+Стартует при входе пользователя и перезапускается при падении (`KeepAlive`).
+
+> Windows-вариант (Task Scheduler под `SYSTEM`) — см. историю репозитория.
 
 ## Ограничения
 
