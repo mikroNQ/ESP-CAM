@@ -12,39 +12,39 @@ on-device CNN, которая различает напиток устойчив
 ## Что переиспользовать
 
 Архитектура и препроцессинг намеренно совпадают с родительским проектом
-(`../../ml/`): вход 24×24×3, box-даунскейл ROI, нормализация в [0,1], int8. Уже
-готовы и проверены в родителе:
+(`../../ml/`): вход 24×24×3, box-даунскейл ROI, нормализация в [0,1], int8.
 
-- `../../ml/collect_session.py` — сбор кадров по сессиям с `/capture` + гейт по яркости
-- `../../ml/train.py` — обучение + генерация `*_model.h` (int8)
-- `../../ml/convert_to_header.py` — `.tflite` → C-заголовок
-- `../../ml/make_bootstrap.py`, `review.py` — вспомогательные
-
-Единственное отличие — **классы**: они заданы в локальном [`model.py`](model.py)
-(`["empty", "coffee_black", "coffee_milk"]`). Скопируй сюда нужные скрипты из
-`../../ml/` (они импортируют `model.py` из своей папки) и работай с этим
-`model.py`.
+- [`collect_session.py`](collect_session.py) — **уже здесь**, адаптирован под
+  `/cupcfg` (родительский читал `/detcfg`). Сбор кадров по сессиям с гейтом по яркости.
+- [`model.py`](model.py) — **уже здесь**, классы `["empty","coffee_black","coffee_milk"]`.
+- `../../ml/train.py`, `../../ml/convert_to_header.py` — копируются из родителя
+  (см. ниже), они импортируют `model.py` из текущей папки.
 
 ## Порядок
 
 ```bash
 cd coffee/ml
-cp ../../ml/{collect_session.py,train.py,convert_to_header.py,requirements.txt} .
 
-# venv для сбора (TF не нужен): numpy + Pillow + requests
+# venv для СБОРА (TF не нужен): numpy + Pillow + requests
 python3 -m venv .venv && source .venv/bin/activate && pip install numpy Pillow requests
 
 # 1. Прицелить ROI по горлу стакана и зафиксировать экспозицию (см. ../README.md),
-#    снимать датасет ПРИ ТЕХ ЖЕ значениях экспозиции, что работает верификатор.
-# 2. Снять кадры по сессиям (держишь одно состояние, снимаешь меткой):
+#    снимать датасет ПРИ ТЕХ ЖЕ значениях экспозиции, что работает верификатор:
+#      curl "http://coffeecam.local/cupcfg?fixexp=1&aec_value=600&agc_gain=0"
+# 2. Снять кадры по сессиям (держишь одно состояние, снимаешь меткой).
+#    Сначала глянь живую яркость ROI в /metrics и подбери гейт --min-v/--max-v:
 python collect_session.py --host coffeecam.local --label empty        --count 300
-python collect_session.py --host coffeecam.local --label coffee_black  --count 300
-python collect_session.py --host coffeecam.local --label coffee_milk   --count 300
+python collect_session.py --host coffeecam.local --label coffee_black  --count 300 --max-v 90
+python collect_session.py --host coffeecam.local --label coffee_milk   --count 300 --min-v 110
+#    Повтори на РАЗНЫХ машинах / свете / стаканах — это и есть подготовка к «проду».
 
 # 3. Обучить (TF нужен Python 3.11–3.12; нет wheel под 3.14):
+cp ../../ml/{train.py,convert_to_header.py,requirements.txt} .
+# !! правка в train.py: HEADER_PATH должен указывать на ../CoffeeVerifier/drink_model.h
+#    (родитель хардкодит ../CameraWebServer/led_model.h)
 /opt/homebrew/bin/python3.12 -m venv .venv-train && source .venv-train/bin/activate
 pip install -r requirements.txt
-python train.py --epochs 40       # -> drink_model.h
+python train.py --epochs 40       # -> ../CoffeeVerifier/drink_model.h
 ```
 
 ## Вживить в прошивку
