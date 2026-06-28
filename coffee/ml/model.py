@@ -18,15 +18,15 @@ misclassification here degrades drink-type accuracy, never the money verdict.
 import numpy as np
 import tensorflow as tf
 
-# Class order MUST match the consumer in cup_verifier.cpp and the data/<label>/
-# folder names. EDIT THIS to your actual machine menu — every change here means
-# recollecting. "empty" cross-checks the baseline-delta money axis (нет кофе);
-# the rest are the drink types the CNN reports (есть кофе/капучино/латте/чай).
-# NOTE: hard pairs to give the most/cleanest data — cappuccino vs latte (both
-# milk+coffee, differ by foam, subtle top-down) and cacao vs coffee (both dark
-# brown). A milky cacao can also look like cappuccino/latte; keep cups/recipe
-# consistent so the colour separates them.
-CLASS_NAMES = ["empty", "coffee", "cappuccino", "latte", "tea", "cacao"]
+# Class order MUST match the data/<label>/ folder names; the firmware reads the
+# class list straight from the generated drink_model.h, so adding a class later =
+# collect data + extend this list + retrain + reflash (no firmware code change).
+#
+# Train only on classes you actually collected — an empty folder yields an
+# untrained output neuron that misfires. This is the current 2-class POC subset;
+# the full target menu is empty/coffee/cappuccino/latte/tea/cacao (hard pairs:
+# cappuccino-vs-latte by foam, cacao-vs-coffee by being both dark brown).
+CLASS_NAMES = ["empty", "cacao"]
 NUM_CLASSES = len(CLASS_NAMES)
 
 # Model input geometry. Keep tiny so it runs software-only on the ESP32.
