@@ -47,12 +47,12 @@ void tcpReporterSetEndpoint(const char *host, uint16_t port) {
 static int format_verdict(char *buf, size_t cap, const cup_verdict_t &v) {
   return snprintf(buf, cap,
                   "{\"type\":\"verdict\",\"seq\":%lu,\"ts_ms\":%lu,"
-                  "\"result\":\"%s\",\"expected\":\"%s\",\"dispensed\":%s,"
-                  "\"milk\":%s,\"fill_ms\":%lu,\"delta\":%.1f,"
+                  "\"result\":\"%s\",\"dispensed\":%s,\"drink\":\"%s\",\"conf\":%.2f,"
+                  "\"fill_ms\":%lu,\"delta\":%.1f,"
                   "\"baseline_y\":%.1f,\"final_y\":%.1f}\n",
                   (unsigned long)v.seq, (unsigned long)v.ts_ms,
-                  cup_result_name(v.result), cup_expect_name(v.expected),
-                  v.dispensed ? "true" : "false", v.observed_milk ? "true" : "false",
+                  cup_result_name(v.result), v.dispensed ? "true" : "false",
+                  cup_drink_name(v.drink_class), v.drink_conf,
                   (unsigned long)v.fill_ms, v.delta, v.baseline.y, v.final.y);
 }
 

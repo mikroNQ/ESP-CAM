@@ -33,7 +33,6 @@ static uint8_t cup_agcgain = CUP_DEFAULT_AGC_GAIN;
 static uint32_t cup_window = CUP_DEFAULT_WINDOW_MS;
 static uint16_t cup_filldelta = CUP_DEFAULT_FILL_DELTA;
 static uint16_t cup_settle = CUP_DEFAULT_SETTLE_FRAMES;
-static uint16_t cup_milkluma = CUP_DEFAULT_MILK_LUMA;
 
 static void loadVerifierConfig() {
   Preferences p;
@@ -55,7 +54,6 @@ static void loadVerifierConfig() {
   cup_window = p.getULong(CUP_NVS_WINDOW, cup_window);
   cup_filldelta = p.getUShort(CUP_NVS_FILLDELTA, cup_filldelta);
   cup_settle = p.getUShort(CUP_NVS_SETTLE, cup_settle);
-  cup_milkluma = p.getUShort(CUP_NVS_MILKLUMA, cup_milkluma);
   p.end();
 }
 
@@ -170,7 +168,7 @@ void setup() {
   // Lock exposure/gain/white-balance so the ROI metrics stay comparable
   // frame-to-frame (independent of verifier init success).
   cupVerifierSetFixedExposure(cup_fixexp, cup_aecval, cup_agcgain);
-  cupVerifierSetParams(cup_window, cup_filldelta, cup_settle, cup_milkluma);
+  cupVerifierSetParams(cup_window, cup_filldelta, cup_settle);
   Serial.printf("Fixed exposure %s (aec_value=%u, agc_gain=%u, awb off)\n",
                 cup_fixexp ? "ON" : "off", cup_aecval, cup_agcgain);
   if (cupVerifierInit(&cup_roi, cup_enabled)) {

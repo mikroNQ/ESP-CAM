@@ -64,11 +64,11 @@
 #define CUP_PLATEAU_EPS    4.0f
 #define CUP_PLATEAU_FRAMES 20
 
-// Milk vs no-milk heuristic (stage 1, no ML): a settled milky drink (latte,
-// cappuccino) is lighter than black coffee. If the filled-surface luminance is
-// above this threshold the drink is classified "with milk". Scene-dependent —
-// tune against /metrics; the optional CNN (stage 2) supersedes this.
-#define CUP_DEFAULT_MILK_LUMA  110
+// Drink type is classified by the on-device CNN (drink_model.h), not a heuristic.
+// TFLite-Micro tensor arena (static DRAM/BSS). 40 KB is what fits alongside the
+// camera + WiFi stack; the boot log prints arena_used_bytes() to confirm it's
+// enough for the model (AllocateTensors fails gracefully -> CNN off if not).
+#define CUP_TENSOR_ARENA_BYTES (40 * 1024)
 
 // ---------------------------------------------------------------------------
 // Fixed exposure / gain / white-balance.
@@ -106,4 +106,3 @@
 #define CUP_NVS_WINDOW   "window"
 #define CUP_NVS_FILLDELTA "filldelta"
 #define CUP_NVS_SETTLE   "settle"
-#define CUP_NVS_MILKLUMA "milkluma"

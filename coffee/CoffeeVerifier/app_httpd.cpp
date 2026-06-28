@@ -550,14 +550,17 @@ static esp_err_t status_handler(httpd_req_t *req) {
   cup_metric_t live = cupVerifierLiveMetric();
   p += snprintf(p, end - p,
                 ",\"cup_enabled\":%d,\"cup_busy\":%d,\"cup_roi\":[%u,%u,%u,%u],"
-                "\"cup_live_y\":%.1f,\"cup_window_ms\":%lu,\"cup_fill_delta\":%u,"
-                "\"cup_settle\":%u,\"cup_milk_luma\":%u,\"cup_fixexp\":%d,"
-                "\"cup_aec_value\":%d,\"cup_agc_gain\":%d,\"tcp_host\":\"%s\","
-                "\"tcp_port\":%u,\"tcp_connected\":%d",
+                "\"cup_live_y\":%.1f,\"cup_live_drink\":\"%s\",\"cup_live_conf\":%.2f,"
+                "\"cup_model\":%d,\"cup_window_ms\":%lu,\"cup_fill_delta\":%u,"
+                "\"cup_settle\":%u,\"cup_fixexp\":%d,\"cup_aec_value\":%d,"
+                "\"cup_agc_gain\":%d,\"tcp_host\":\"%s\",\"tcp_port\":%u,"
+                "\"tcp_connected\":%d",
                 cupVerifierIsEnabled() ? 1 : 0, cupVerifierBusy() ? 1 : 0,
                 croi.x, croi.y, croi.w, croi.h, live.y,
+                cup_drink_name(cupVerifierLiveClass()), cupVerifierLiveClassConf(),
+                cupVerifierModelReady() ? 1 : 0,
                 (unsigned long)cupVerifierWindowMs(), cupVerifierFillDelta(),
-                cupVerifierSettleFrames(), cupVerifierMilkLuma(),
+                cupVerifierSettleFrames(),
                 cupVerifierFixedExpEnabled() ? 1 : 0, cupVerifierAecValue(),
                 cupVerifierAgcGain(), tcpReporterHost(), tcpReporterPort(),
                 tcpReporterConnected() ? 1 : 0);
@@ -586,23 +589,24 @@ static int cup_config_json(char *json, size_t cap) {
   return snprintf(json, cap,
                   "{\"enabled\":%d,\"busy\":%d,\"host\":\"%s\",\"port\":%u,"
                   "\"roi\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},"
-                  "\"window_ms\":%lu,\"fill_delta\":%u,\"settle\":%u,\"milk_luma\":%u,"
+                  "\"window_ms\":%lu,\"fill_delta\":%u,\"settle\":%u,"
                   "\"fixexp\":%d,\"aec_value\":%d,\"agc_gain\":%d,"
                   "\"live\":{\"r\":%.1f,\"g\":%.1f,\"b\":%.1f,\"y\":%.1f},"
-                  "\"tcp_connected\":%d}",
+                  "\"live_drink\":\"%s\",\"model\":%d,\"tcp_connected\":%d}",
                   cupVerifierIsEnabled() ? 1 : 0, cupVerifierBusy() ? 1 : 0,
                   tcpReporterHost(), tcpReporterPort(),
                   roi.x, roi.y, roi.w, roi.h,
                   (unsigned long)cupVerifierWindowMs(), cupVerifierFillDelta(),
-                  cupVerifierSettleFrames(), cupVerifierMilkLuma(),
+                  cupVerifierSettleFrames(),
                   cupVerifierFixedExpEnabled() ? 1 : 0, cupVerifierAecValue(),
                   cupVerifierAgcGain(), live.r, live.g, live.b, live.y,
-                  tcpReporterConnected() ? 1 : 0);
+                  cup_drink_name(cupVerifierLiveClass()),
+                  cupVerifierModelReady() ? 1 : 0, tcpReporterConnected() ? 1 : 0);
 }
 
 // /cupcfg — read/update the verifier + TCP reporter config and persist to NVS.
 // Accepts any subset of: host, port, roi_x, roi_y, roi_w, roi_h, enable,
-// fixexp, aec_value, agc_gain, window_ms, fill_delta, settle, milk_luma.
+// fixexp, aec_value, agc_gain, window_ms, fill_delta, settle.
 // Always responds with the current effective config as JSON.
 static esp_err_t cupcfg_handler(httpd_req_t *req) {
   char *buf = NULL;
@@ -648,7 +652,6 @@ static esp_err_t cupcfg_handler(httpd_req_t *req) {
     uint32_t window_ms = cupVerifierWindowMs();
     uint16_t fill_delta = cupVerifierFillDelta();
     uint16_t settle = cupVerifierSettleFrames();
-    uint16_t milk_luma = cupVerifierMilkLuma();
     bool param_changed = false;
     if (httpd_query_key_value(buf, "window_ms", v, sizeof(v)) == ESP_OK) {
       window_ms = (uint32_t)strtoul(v, NULL, 10); prefs.putULong(CUP_NVS_WINDOW, window_ms); param_changed = true;
@@ -659,10 +662,7 @@ static esp_err_t cupcfg_handler(httpd_req_t *req) {
     if (httpd_query_key_value(buf, "settle", v, sizeof(v)) == ESP_OK) {
       settle = (uint16_t)atoi(v); prefs.putUShort(CUP_NVS_SETTLE, settle); param_changed = true;
     }
-    if (httpd_query_key_value(buf, "milk_luma", v, sizeof(v)) == ESP_OK) {
-      milk_luma = (uint16_t)atoi(v); prefs.putUShort(CUP_NVS_MILKLUMA, milk_luma); param_changed = true;
-    }
-    if (param_changed) cupVerifierSetParams(window_ms, fill_delta, settle, milk_luma);
+    if (param_changed) cupVerifierSetParams(window_ms, fill_delta, settle);
 
     // Fixed exposure lock (keeps metrics comparable frame-to-frame).
     bool fixexp = cupVerifierFixedExpEnabled();
@@ -692,51 +692,27 @@ static esp_err_t cupcfg_handler(httpd_req_t *req) {
   return httpd_resp_send(req, json, n);
 }
 
-// Map a drink name (or explicit milk flag) to the milk expectation axis.
-static cup_expect_t parse_expectation(const char *buf) {
-  char v[24];
-  if (httpd_query_key_value(buf, "milk", v, sizeof(v)) == ESP_OK) {
-    return atoi(v) != 0 ? CUP_EXPECT_MILK : CUP_EXPECT_NOMILK;
-  }
-  if (httpd_query_key_value(buf, "drink", v, sizeof(v)) == ESP_OK) {
-    // Lowercase for a case-insensitive match.
-    for (char *c = v; *c; c++) *c = tolower((unsigned char)*c);
-    if (strstr(v, "latte") || strstr(v, "cappucc") || strstr(v, "flat") ||
-        strstr(v, "milk") || strstr(v, "mocha") || strstr(v, "macchiat")) {
-      return CUP_EXPECT_MILK;
-    }
-    if (strstr(v, "espresso") || strstr(v, "americano") || strstr(v, "black") ||
-        strstr(v, "ristretto") || strstr(v, "lungo")) {
-      return CUP_EXPECT_NOMILK;
-    }
-  }
-  return CUP_EXPECT_ANY;
-}
-
 // Build a verdict JSON line into json. Returns length written.
 static int verdict_json(char *json, size_t cap, const cup_verdict_t &v) {
   return snprintf(json, cap,
-                  "{\"seq\":%lu,\"result\":\"%s\",\"expected\":\"%s\","
-                  "\"dispensed\":%s,\"milk\":%s,\"fill_ms\":%lu,\"delta\":%.1f,"
+                  "{\"seq\":%lu,\"result\":\"%s\",\"dispensed\":%s,"
+                  "\"drink\":\"%s\",\"conf\":%.2f,\"fill_ms\":%lu,\"delta\":%.1f,"
                   "\"baseline_y\":%.1f,\"final_y\":%.1f}",
                   (unsigned long)v.seq, cup_result_name(v.result),
-                  cup_expect_name(v.expected), v.dispensed ? "true" : "false",
-                  v.observed_milk ? "true" : "false", (unsigned long)v.fill_ms,
+                  v.dispensed ? "true" : "false", cup_drink_name(v.drink_class),
+                  v.drink_conf, (unsigned long)v.fill_ms,
                   v.delta, v.baseline.y, v.final.y);
 }
 
-// /verify — emulated payment trigger. Starts one verification window.
-//   ?drink=latte | espresso | ...   (maps to the milk axis)
-//   ?milk=1|0                        (explicit milk axis, overrides drink)
-//   ?wait=1                          (block up to window+slack and return the
-//                                     verdict JSON; otherwise return immediately)
-// The verdict is always also pushed over TCP and kept as the last verdict.
+// /verify — emulated payment trigger. Starts one verification window. The ESP
+// reports the observed drink class (CNN) and dispensed/not (baseline delta).
+//   ?wait=1   block up to window+slack and return the verdict JSON; otherwise
+//             return immediately (the verdict still arrives over TCP + /metrics).
+// (Expected-vs-observed matching is a later pass.)
 static esp_err_t verify_handler(httpd_req_t *req) {
   char *buf = NULL;
-  cup_expect_t expect = CUP_EXPECT_ANY;
   bool wait = false;
   if (httpd_req_get_url_query_len(req) > 0 && parse_get(req, &buf) == ESP_OK) {
-    expect = parse_expectation(buf);
     char v[8];
     if (httpd_query_key_value(buf, "wait", v, sizeof(v)) == ESP_OK) wait = atoi(v) != 0;
     free(buf);
@@ -746,7 +722,7 @@ static esp_err_t verify_handler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
   uint32_t prev_seq = cupVerifierVerdictSeq();
-  if (!cupVerifierStartVerification(expect)) {
+  if (!cupVerifierStartVerification()) {
     httpd_resp_set_status(req, "409 Conflict");
     const char *msg = cupVerifierIsEnabled()
                           ? "{\"error\":\"busy\",\"detail\":\"a verification is already running\"}"
@@ -757,8 +733,8 @@ static esp_err_t verify_handler(httpd_req_t *req) {
   if (!wait) {
     char json[160];
     int n = snprintf(json, sizeof(json),
-                     "{\"started\":true,\"seq\":%lu,\"expected\":\"%s\",\"window_ms\":%lu}",
-                     (unsigned long)(prev_seq + 1), cup_expect_name(expect),
+                     "{\"started\":true,\"seq\":%lu,\"window_ms\":%lu}",
+                     (unsigned long)(prev_seq + 1),
                      (unsigned long)cupVerifierWindowMs());
     return httpd_resp_send(req, json, n);
   }
@@ -779,8 +755,9 @@ static esp_err_t verify_handler(httpd_req_t *req) {
   return httpd_resp_send(req, msg, strlen(msg));
 }
 
-// /metrics — live debugging: current ROI metric, verifier state and last verdict.
-// Poll this while tuning ROI / fill_delta / milk_luma against a real cup.
+// /metrics — live debugging: ROI metric, LIVE drink class (on-device CNN sanity
+// instrument: point at empty vs a drink and watch it flip), state, last verdict.
+// Poll this while tuning ROI / fill_delta against a real cup.
 static esp_err_t metrics_handler(httpd_req_t *req) {
   cup_metric_t live = cupVerifierLiveMetric();
   cup_roi_t roi = cupVerifierGetRoi();
@@ -789,11 +766,14 @@ static esp_err_t metrics_handler(httpd_req_t *req) {
   char *end = json + sizeof(json);
   p += snprintf(p, end - p,
                 "{\"live\":{\"r\":%.1f,\"g\":%.1f,\"b\":%.1f,\"y\":%.1f},"
+                "\"live_drink\":\"%s\",\"live_conf\":%.2f,\"model\":%d,"
                 "\"roi\":{\"x\":%u,\"y\":%u,\"w\":%u,\"h\":%u},"
-                "\"busy\":%d,\"enabled\":%d,\"fill_delta\":%u,\"milk_luma\":%u",
-                live.r, live.g, live.b, live.y, roi.x, roi.y, roi.w, roi.h,
+                "\"busy\":%d,\"enabled\":%d,\"fill_delta\":%u",
+                live.r, live.g, live.b, live.y,
+                cup_drink_name(cupVerifierLiveClass()), cupVerifierLiveClassConf(),
+                cupVerifierModelReady() ? 1 : 0, roi.x, roi.y, roi.w, roi.h,
                 cupVerifierBusy() ? 1 : 0, cupVerifierIsEnabled() ? 1 : 0,
-                cupVerifierFillDelta(), cupVerifierMilkLuma());
+                cupVerifierFillDelta());
   cup_verdict_t v;
   if (cupVerifierLastVerdict(&v)) {
     p += snprintf(p, end - p, ",\"last_verdict\":");
