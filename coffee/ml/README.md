@@ -31,11 +31,14 @@ python3 -m venv .venv && source .venv/bin/activate && pip install numpy Pillow r
 # 1. Прицелить ROI по горлу стакана и зафиксировать экспозицию (см. ../README.md),
 #    снимать датасет ПРИ ТЕХ ЖЕ значениях экспозиции, что работает верификатор:
 #      curl "http://coffeecam.local/cupcfg?fixexp=1&aec_value=600&agc_gain=0"
-# 2. Снять кадры по сессиям (держишь одно состояние, снимаешь меткой).
-#    Сначала глянь живую яркость ROI в /metrics и подбери гейт --min-v/--max-v:
-python collect_session.py --host coffeecam.local --label empty        --count 300
-python collect_session.py --host coffeecam.local --label coffee_black  --count 300 --max-v 90
-python collect_session.py --host coffeecam.local --label coffee_milk   --count 300 --min-v 110
+# 2. Снять кадры по сессиям (держишь ОДИН напиток, снимаешь его меткой).
+#    Метки = CLASS_NAMES из model.py. Гейт --min-v/--max-v опционален (отсекает
+#    кадры не в том состоянии); подбери по живой яркости ROI в /metrics.
+python collect_session.py --host coffeecam.local --label empty       --count 400
+python collect_session.py --host coffeecam.local --label coffee      --count 400
+python collect_session.py --host coffeecam.local --label cappuccino  --count 600   # хард-пара
+python collect_session.py --host coffeecam.local --label latte       --count 600   # с капучино
+python collect_session.py --host coffeecam.local --label tea         --count 400
 #    Повтори на РАЗНЫХ машинах / свете / стаканах — это и есть подготовка к «проду».
 
 # 3. Обучить (TF нужен Python 3.11–3.12; нет wheel под 3.14):

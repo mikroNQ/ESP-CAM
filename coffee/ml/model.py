@@ -18,10 +18,13 @@ misclassification here degrades drink-type accuracy, never the money verdict.
 import numpy as np
 import tensorflow as tf
 
-# Class order MUST match the consumer in cup_verifier.cpp. The "empty" class is
-# included for training robustness / an optional sanity check; the milk axis the
-# firmware needs is coffee_black vs coffee_milk.
-CLASS_NAMES = ["empty", "coffee_black", "coffee_milk"]
+# Class order MUST match the consumer in cup_verifier.cpp and the data/<label>/
+# folder names. EDIT THIS to your actual machine menu — every change here means
+# recollecting. "empty" cross-checks the baseline-delta money axis (нет кофе);
+# the rest are the drink types the CNN reports (есть кофе/капучино/латте/чай).
+# NOTE: cappuccino vs latte is the hard pair (both milk+coffee; they differ by
+# foam, which is subtle top-down) — give it the most/cleanest data.
+CLASS_NAMES = ["empty", "coffee", "cappuccino", "latte", "tea"]
 NUM_CLASSES = len(CLASS_NAMES)
 
 # Model input geometry. Keep tiny so it runs software-only on the ESP32.
@@ -31,7 +34,8 @@ INPUT_CH = 3
 
 
 def build_model():
-    """A tiny RGB CNN. Milk vs black is a colour/brightness job, hence 3 channels."""
+    """A tiny RGB CNN. Telling drinks apart is a colour/texture job, hence 3 channels.
+    Bump the conv widths (8->16, 16->32) if 5 classes underfit — check arena size."""
     inputs = tf.keras.Input(shape=(INPUT_H, INPUT_W, INPUT_CH))
     x = tf.keras.layers.Conv2D(8, 3, padding="same", activation="relu")(inputs)
     x = tf.keras.layers.MaxPooling2D()(x)

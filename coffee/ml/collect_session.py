@@ -15,10 +15,12 @@ Exposure: lock it ONCE before collecting and use the SAME lock at deployment —
 The firmware holds that lock (re-asserting every ~2s), so this script doesn't
 touch exposure. Verify `cup_fixexp:1` in /status before a session.
 
+Labels are the CLASS_NAMES in model.py (edit them to your machine menu).
+
 Examples:
-    python collect_session.py --host coffeecam.local --label empty        --count 300
-    python collect_session.py --host coffeecam.local --label coffee_black  --count 300 --max-v 90
-    python collect_session.py --host coffeecam.local --label coffee_milk   --count 300 --min-v 110
+    python collect_session.py --host coffeecam.local --label empty       --count 400
+    python collect_session.py --host coffeecam.local --label cappuccino  --count 600
+    python collect_session.py --host coffeecam.local --label tea         --count 400 --max-v 200
 """
 import argparse
 import io
