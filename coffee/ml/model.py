@@ -22,9 +22,11 @@ import tensorflow as tf
 # folder names. EDIT THIS to your actual machine menu — every change here means
 # recollecting. "empty" cross-checks the baseline-delta money axis (нет кофе);
 # the rest are the drink types the CNN reports (есть кофе/капучино/латте/чай).
-# NOTE: cappuccino vs latte is the hard pair (both milk+coffee; they differ by
-# foam, which is subtle top-down) — give it the most/cleanest data.
-CLASS_NAMES = ["empty", "coffee", "cappuccino", "latte", "tea"]
+# NOTE: hard pairs to give the most/cleanest data — cappuccino vs latte (both
+# milk+coffee, differ by foam, subtle top-down) and cacao vs coffee (both dark
+# brown). A milky cacao can also look like cappuccino/latte; keep cups/recipe
+# consistent so the colour separates them.
+CLASS_NAMES = ["empty", "coffee", "cappuccino", "latte", "tea", "cacao"]
 NUM_CLASSES = len(CLASS_NAMES)
 
 # Model input geometry. Keep tiny so it runs software-only on the ESP32.
@@ -35,7 +37,7 @@ INPUT_CH = 3
 
 def build_model():
     """A tiny RGB CNN. Telling drinks apart is a colour/texture job, hence 3 channels.
-    Bump the conv widths (8->16, 16->32) if 5 classes underfit — check arena size."""
+    Bump the conv widths (8->16, 16->32) if the classes underfit — check arena size."""
     inputs = tf.keras.Input(shape=(INPUT_H, INPUT_W, INPUT_CH))
     x = tf.keras.layers.Conv2D(8, 3, padding="same", activation="relu")(inputs)
     x = tf.keras.layers.MaxPooling2D()(x)

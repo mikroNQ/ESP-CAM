@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CoffeeVerifier — ROI / exposure calibration</title>
+<!--
+  Live ROI calibration console. Just open this file in a browser (double-click).
+  It auto-refreshes /capture?roi=1 (the frame with the green ROI box) and lets
+  you tweak ROI / exposure / thresholds live — each field applies via /cupcfg on
+  change. The live r/g/b/y readout comes from /metrics. No server, no deps; the
+  firmware allows cross-origin (Access-Control-Allow-Origin: *).
+
+  Use it to: aim the ROI on the cup mouth, expose an empty cup correctly (watch
+  y — not crushed dark, not ~230 blown), then read y for empty vs each drink to
+  pick fill_delta / milk_luma.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; background:#1c1c1c; color:#eee; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  .row { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }
+  #cam { image-rendering: pixelated; width: 480px; height: 360px; background:#000;
+         border:1px solid #444; }
+  fieldset { border:1px solid #444; border-radius:6px; margin:0 0 12px; padding:8px 12px; }
+  legend { color:#9cf; padding:0 6px; }
+  label { display:inline-flex; flex-direction:column; margin:4px 10px 4px 0; font-size:12px; color:#aaa; }
+  input[type=number] { width:74px; background:#2a2a2a; color:#eee; border:1px solid #555;
+                       border-radius:4px; padding:4px; font-size:14px; }
+  input[type=text] { width:140px; background:#2a2a2a; color:#eee; border:1px solid #555;
+                     border-radius:4px; padding:4px; }
+  button { background:#345; color:#eee; border:1px solid #567; border-radius:4px;
+           padding:5px 10px; cursor:pointer; }
+  #live { font: 13px ui-monospace, monospace; line-height:1.7; }
+  #live b { color:#6f6; }
+  #status { color:#9c9; min-height:18px; font-size:12px; }
+  .swatch { display:inline-block; width:22px; height:22px; border:1px solid #777;
+            vertical-align:middle; border-radius:3px; }
+</style>
+
+<h1>CoffeeVerifier — калибровка ROI / экспозиции</h1>
+
+<div class="row" style="margin-bottom:10px">
+  <label>Камера (IP)
+    <input id="host" type="text" value="192.168.1.101">
+  </label>
+  <label>Кадр/мс
+    <input id="period" type="number" value="500" step="100" min="200">
+  </label>
+  <button id="reload">Прочитать конфиг с камеры</button>
+</div>
+
+<div class="row">
+  <img id="cam" alt="camera">
+
+  <div>
+    <fieldset>
+      <legend>ROI (по горлу стакана)</legend>
+      <label>x <input id="roi_x" type="number" min="0" max="160"></label>
+      <label>y <input id="roi_y" type="number" min="0" max="120"></label>
+      <label>w <input id="roi_w" type="number" min="1" max="160"></label>
+      <label>h <input id="roi_h" type="number" min="1" max="120"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Экспозиция (фикс)</legend>
+      <label>aec_value <input id="aec_value" type="number" min="0" max="1600"></label>
+      <label>agc_gain <input id="agc_gain" type="number" min="0" max="30"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Пороги вердикта</legend>
+      <label>fill_delta <input id="fill_delta" type="number" min="0" max="255"></label>
+      <label>milk_luma <input id="milk_luma" type="number" min="0" max="255"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Живая метрика ROI</legend>
+      <div id="live">—</div>
+      <div>средний цвет ROI: <span id="sw" class="swatch"></span></div>
+    </fieldset>
+
+    <div id="status"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const base = () => "http://" + $("host").value.trim();
+const CFG_FIELDS = ["roi_x","roi_y","roi_w","roi_h","aec_value","agc_gain","fill_delta","milk_luma"];
+
+// Apply one field to the firmware via /cupcfg on change.
+async function apply(field) {
+  const v = $(field).value;
+  if (v === "") return;
+  try {
+    const r = await fetch(`${base()}/cupcfg?${field}=${encodeURIComponent(v)}`);
+    await r.json();
+    $("status").textContent = `✓ ${field} = ${v}`;
+  } catch (e) {
+    $("status").textContent = `✗ ${field}: ${e} — проверь IP и что камера в той же сети`;
+  }
+}
+CFG_FIELDS.forEach(f => $(f).addEventListener("change", () => apply(f)));
+
+// Load current config from the camera into the inputs.
+async function loadConfig() {
+  try {
+    const c = await (await fetch(`${base()}/cupcfg`)).json();
+    $("roi_x").value = c.roi.x; $("roi_y").value = c.roi.y;
+    $("roi_w").value = c.roi.w; $("roi_h").value = c.roi.h;
+    $("aec_value").value = c.aec_value; $("agc_gain").value = c.agc_gain;
+    $("fill_delta").value = c.fill_delta; $("milk_luma").value = c.milk_luma;
+    $("status").textContent = "конфиг загружен с камеры";
+  } catch (e) {
+    $("status").textContent = `не дотянулся до ${base()}/cupcfg: ${e}`;
+  }
+}
+$("reload").addEventListener("click", loadConfig);
+
+// Live metric readout from /metrics.
+async function pollMetrics() {
+  try {
+    const m = await (await fetch(`${base()}/metrics`)).json();
+    const L = m.live;
+    $("live").innerHTML =
+      `y=<b>${L.y.toFixed(1)}</b>  r=${L.r.toFixed(0)} g=${L.g.toFixed(0)} b=${L.b.toFixed(0)}` +
+      `<br>busy=${m.busy}  fill_delta=${m.fill_delta}  milk_luma=${m.milk_luma}`;
+    $("sw").style.background = `rgb(${L.r|0},${L.g|0},${L.b|0})`;
+  } catch (e) { /* transient */ }
+}
+
+// Auto-refresh the ROI-overlaid frame.
+function tick() {
+  const img = $("cam");
+  img.src = `${base()}/capture?roi=1&t=${Date.now()}`;
+  pollMetrics();
+}
+let timer = null;
+function restart() {
+  if (timer) clearInterval(timer);
+  timer = setInterval(tick, Math.max(200, +$("period").value || 500));
+}
+$("period").addEventListener("change", restart);
+$("host").addEventListener("change", () => { loadConfig(); restart(); });
+
+loadConfig();
+tick();
+restart();
+</script>

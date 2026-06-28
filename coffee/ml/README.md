@@ -34,11 +34,14 @@ python3 -m venv .venv && source .venv/bin/activate && pip install numpy Pillow r
 # 2. Снять кадры по сессиям (держишь ОДИН напиток, снимаешь его меткой).
 #    Метки = CLASS_NAMES из model.py. Гейт --min-v/--max-v опционален (отсекает
 #    кадры не в том состоянии); подбери по живой яркости ROI в /metrics.
-python collect_session.py --host coffeecam.local --label empty       --count 400
-python collect_session.py --host coffeecam.local --label coffee      --count 400
-python collect_session.py --host coffeecam.local --label cappuccino  --count 600   # хард-пара
-python collect_session.py --host coffeecam.local --label latte       --count 600   # с капучино
-python collect_session.py --host coffeecam.local --label tea         --count 400
+python collect_session.py --host 192.168.1.101 --label empty       --count 400 --interval 0
+python collect_session.py --host 192.168.1.101 --label coffee      --count 400 --interval 0
+python collect_session.py --host 192.168.1.101 --label cappuccino  --count 600 --interval 0   # хард-пара
+python collect_session.py --host 192.168.1.101 --label latte       --count 600 --interval 0   # с капучино
+python collect_session.py --host 192.168.1.101 --label tea         --count 400 --interval 0
+python collect_session.py --host 192.168.1.101 --label cacao       --count 500 --interval 0   # тёмный, путается с coffee
+#    Снимай ФИНАЛЬНЫЙ налитый уровень (после settle), не переходные кадры налива.
+#    Используй IP, не coffeecam.local (.local на macOS даёт ~5с mDNS-таймаут на запрос).
 #    Повтори на РАЗНЫХ машинах / свете / стаканах — это и есть подготовка к «проду».
 
 # 3. Обучить (TF нужен Python 3.11–3.12; нет wheel под 3.14):

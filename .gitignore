@@ -1,5 +1,5 @@
 build/
-tools/
+/tools/
 *.bin
 *.elf
 *.map
@@ -17,9 +17,13 @@ dashboard/esp-dashboard-*
 go.work
 go.work.sum
 
-# ML pipeline (см. ml/)
+# ML pipeline (см. ml/ и coffee/ml/) — датасет и venv не версионируем
 ml/data/
 ml/__pycache__/
 ml/.venv/
 ml/.venv-train/
+coffee/ml/data/
+coffee/ml/__pycache__/
+coffee/ml/.venv/
+coffee/ml/.venv-train/
 *.tflite
