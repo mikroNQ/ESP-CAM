@@ -30,7 +30,8 @@ baseline-кадра — **без ML**. Тип напитка определяе�
 ```bash
 cd coffee/ml
 
-# 0. Задать классы под своё меню в model.py → CLASS_NAMES.
+# 0. Задать классы под своё меню в model.py → CLASS_NAMES, например полное меню:
+#       CLASS_NAMES = ["empty", "coffee", "cappuccino", "latte", "tea", "cacao"]
 #    Метки сбора и порядок выхода берутся отсюда. Прошивка подхватывает имена
 #    классов и их число из сгенерированного drink_model.h — править C++ НЕ нужно.
 
@@ -44,9 +45,13 @@ python3 -m venv .venv && source .venv/bin/activate && pip install numpy Pillow r
 # 3. Снять кадры по сессиям — одну метку за сессию, метки = CLASS_NAMES.
 #    Снимай ФИНАЛЬНЫЙ налитый уровень (после settle), не переходные кадры налива.
 #    Используй IP, а не coffeecam.local (.local на macOS даёт ~5с mDNS-таймаут).
-python collect_session.py --host 192.168.1.101 --label empty --count 400 --interval 0
-python collect_session.py --host 192.168.1.101 --label cacao --count 500 --interval 0
-#    ... по строке на каждый класс из CLASS_NAMES.
+python collect_session.py --host 192.168.1.101 --label empty      --count 400 --interval 0
+python collect_session.py --host 192.168.1.101 --label coffee     --count 400 --interval 0
+python collect_session.py --host 192.168.1.101 --label cappuccino --count 600 --interval 0   # хард-пара
+python collect_session.py --host 192.168.1.101 --label latte      --count 600 --interval 0   # с капучино (по пене)
+python collect_session.py --host 192.168.1.101 --label tea        --count 400 --interval 0
+python collect_session.py --host 192.168.1.101 --label cacao      --count 500 --interval 0   # хард-пара с coffee (оба тёмные)
+#    По строке на каждый класс из CLASS_NAMES; хард-парам дай больше кадров.
 #    Повтори на РАЗНЫХ машинах / свете / стаканах — это и есть подготовка к «проду».
 
 # 4. Обучить (TensorFlow нужен Python 3.11–3.12; под 3.14 wheel ещё нет):
@@ -59,8 +64,23 @@ arduino-cli compile --fqbn esp32:esp32:esp32cam ../CoffeeVerifier
 arduino-cli upload  --fqbn esp32:esp32:esp32cam --port /dev/cu.usbserial-XXX ../CoffeeVerifier
 ```
 
-Новые классы попадают в `/metrics`, `/status` и вердикты автоматически — прошивка
-читает имена классов и их число из `drink_model.h`, никаких правок кода.
+## Проверить после прошивки
+
+В Serial-логе (115200 бод) при старте прошивка печатает строку вида:
+
+```
+[verify] model ready, 6 classes, arena used XXXXX / 40960 bytes
+```
+
+- видишь свои классы и их число — значит новый `drink_model.h` подхватился
+  (имена классов также появляются в `/metrics`, `/status` и вердиктах);
+- `arena used` должен быть **меньше 40960**. Тензор-арена статическая, **40 КБ**
+  (`CUP_TENSOR_ARENA_BYTES` в [`../CoffeeVerifier/config.h`](../CoffeeVerifier/config.h)).
+  От добавления классов модель растёт чуть-чуть (только выходной слой), 40 КБ
+  почти наверняка хватит. Если вместо строки выше видишь
+  `AllocateTensors failed (arena too small?)` — подними значение (например
+  `48 * 1024`) и перепрошей.
 
 > Валидируй вживую (разные стаканы / свет / пенка), а не по `val_accuracy` —
-> валидация из одной сессии оптимистична.
+> валидация из одной сессии оптимистична. Где путается (обычно хард-пары) —
+> дособери кадров по этим классам и переобучи.
