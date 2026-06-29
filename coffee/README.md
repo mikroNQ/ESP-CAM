@@ -39,8 +39,11 @@ LED-детектора (то же ядро: камера RGB565/QQVGA, ROI, фи
 
 ## Прошивка
 
-Тулчейн тот же, что у родительского проекта (`esp32:esp32@3.3.8`, `WiFiManager`).
-**TensorFlow/Chirale для MVP не нужны** — CNN не используется.
+Зависимости: `esp32:esp32@3.3.8`, `WiFiManager`, **`Chirale_TensorFlowLite`**.
+В текущей сборке on-device CNN уже вшита в прошивку (`drink_model.h` +
+`Chirale_TensorFlowLite` в `cup_verifier.cpp`), поэтому библиотека TFLite-Micro
+нужна для компиляции. Денежная ось («налито/нет») по-прежнему держится на дельте
+от baseline, CNN отвечает только за тип напитка.
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32cam coffee/CoffeeVerifier
