@@ -10,7 +10,7 @@
    подсветка     red_on / white_on / off                     :9000           :8080
 ```
 
-> 👵 **Просто запустить и смотреть** (от включения камеры до страницы в браузере,
+> 🚀 **Просто запустить и смотреть** (от включения камеры до страницы в браузере,
 > без терминов) → [docs/QUICKSTART.md](docs/QUICKSTART.md).
 > 📋 **Шпаргалка команд** (прошивка, камера, сбор, обучение, дашборд, git) →
 > [docs/CHEATSHEET.md](docs/CHEATSHEET.md).
@@ -258,8 +258,8 @@ curl "http://<cam-ip>/detcfg?host=<pc-ip>&port=9000"
 # открыть http://<pc-ip>:8080
 ```
 
-Подробности — в [`dashboard/README.md`](dashboard/README.md). Простой запуск
-«для бабушки» — в [docs/QUICKSTART.md](docs/QUICKSTART.md).
+Подробности — в [`dashboard/README.md`](dashboard/README.md). Упрощённая
+пошаговая инструкция по запуску — в [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ## Структура
 
