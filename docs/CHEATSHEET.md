@@ -18,7 +18,7 @@
 
 ---
 
-## 🔌 Прошивка (arduino-cli)
+## Прошивка (arduino-cli)
 
 ```powershell
 # 1) перемычка IO0<->GND, передёрнуть питание 5В, потом:
@@ -35,7 +35,7 @@ Get-PnpDevice -Class Ports -PresentOnly | Where-Object FriendlyName -match 'CH34
 
 ---
 
-## 📷 Настройка камеры (открыть в браузере или `curl.exe`)
+## Настройка камеры (открыть в браузере или `curl.exe`)
 
 ```text
 http://<cam-ip>/status                                   # полный статус (камера + детектор)
@@ -51,7 +51,7 @@ http://<cam-ip>/detcfg?host=<pc-ip>&port=9000                  # куда сла
 
 ---
 
-## 🎞️ Сбор датасета (Python, из корня)
+## Сбор датасета (Python, из корня)
 
 ```powershell
 # один раз: pip install -r ml\requirements.txt
@@ -68,7 +68,7 @@ Get-ChildItem ml\data -Directory | ForEach-Object { "$($_.Name): $((Get-ChildIte
 
 ---
 
-## 🧠 Обучение модели
+## Обучение модели
 
 ```powershell
 py ml\train.py --epochs 40        # перезапишет CameraWebServer\led_model.h
@@ -77,7 +77,7 @@ py ml\train.py --epochs 40        # перезапишет CameraWebServer\led_m
 
 ---
 
-## 🖥️ Веб-дашборд (Go)
+## Веб-дашборд (Go)
 
 ```powershell
 cd dashboard
@@ -96,7 +96,7 @@ Stop-Process -Name esp-dashboard -Force
 
 ---
 
-## 🔍 Диагностика
+## Диагностика
 
 ```powershell
 # средняя яркость/цвет ROI прямо сейчас (помогает подобрать экспозицию/гейты):
@@ -116,7 +116,7 @@ py -c "import requests; s=requests.get('http://<cam-ip>/status',timeout=8).json(
 
 ---
 
-## 🌿 Git (особенность окружения)
+## Git (особенность окружения)
 
 В этом окружении штатный `git push` ломается (GCM + msys). Рабочая команда —
 сбросить список хелперов и оставить `wincred`:
@@ -131,7 +131,7 @@ git -c credential.helper= -c credential.helper=wincred push origin main
 
 ---
 
-## ⚙️ Где что менять (config)
+## Где что менять (config)
 
 | Параметр | Файл | Дефолт |
 |---|---|---|
